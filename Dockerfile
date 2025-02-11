@@ -25,4 +25,4 @@ RUN pip install --no-cache-dir .
 USER signalbot
 
 # Command to run the bot
-CMD ["python", "main.py"] 
+CMD ["python", "main.py"]

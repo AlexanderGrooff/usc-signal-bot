@@ -1,7 +1,8 @@
 """Signal bot commands."""
 
-from datetime import datetime
 import logging
+from datetime import datetime
+
 from signalbot import Command, Context, triggered
 
 from usc_signal_bot.config import USCCreds
@@ -47,23 +48,22 @@ class GetTimeslotsCommand(Command):
         try:
             await usc.authenticate(self.usc_creds.username, self.usc_creds.password)
             timeslots = await usc.get_slots(datetime.now())
-            
+
             # Format the response
             available_slots = [
                 f"- {slot.startDate} - {slot.endDate}"
                 for slot in timeslots.data
                 if slot.isAvailable
             ]
-            
+
             if available_slots:
                 response = "Available slots:\n" + "\n".join(available_slots)
             else:
                 response = "No available slots found"
-            
+
             await c.send(response)
         except Exception as e:
             logging.error(f"Error getting timeslots: {e}")
             await c.send(f"Error getting timeslots: {e}")
         finally:
             await usc.close()
-

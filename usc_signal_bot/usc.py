@@ -1,13 +1,13 @@
 """USC API client for gym reservations."""
 
-from dateparser import parse
-from datetime import datetime
 import json
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
-from pydantic import BaseModel, ConfigDict
+from dateparser import parse
+from pydantic import BaseModel
 
 
 class Auth(BaseModel):
@@ -19,7 +19,6 @@ class Auth(BaseModel):
     token_type: str
     access_token: str
     refresh_token: str
-
 
 
 class Member(BaseModel):
@@ -39,7 +38,6 @@ class BookableSlot(BaseModel):
     bookableProductId: int  # Squash court number
 
 
-
 class BookableSlotsResponse(BaseModel):
     """USC bookable slots response."""
 
@@ -48,7 +46,6 @@ class BookableSlotsResponse(BaseModel):
     count: int
     total: int
     pageCount: int
-
 
 
 class BookingParams(BaseModel):
@@ -64,7 +61,6 @@ class BookingParams(BaseModel):
     invitedOthers: List[str]
     secondaryPurchaseMessage: Optional[str] = None
     primaryPurchaseMessage: Optional[str] = None
-
 
 
 class BookingData(BaseModel):
@@ -129,25 +125,32 @@ class USCClient:
 
         logging.info(f"Getting slots from {date_str}T{from_time}Z to {date_str}T{until_time}Z")
         params = {
-            "s": json.dumps({
-                "startDate": f"{date_str}T{from_time}Z",
-                "endDate": f"{date_str}T{until_time}Z",
-                "tagIds": {"$in": [195]},
-                "availableFromDate": {"$gt": f"{date_str}T{from_time}Z"},
-                "availableTillDate": {"$lte": f"{date_str}T{until_time}Z"},
-            }),
-            "join": json.dumps([
-                "linkedProduct",
-                "linkedProduct.translations",
-                "product",
-                "product.translations",
-            ]),
+            "s": json.dumps(
+                {
+                    "startDate": f"{date_str}T{from_time}Z",
+                    "endDate": f"{date_str}T{until_time}Z",
+                    "tagIds": {"$in": [195]},
+                    "availableFromDate": {"$gt": f"{date_str}T{from_time}Z"},
+                    "availableTillDate": {"$lte": f"{date_str}T{until_time}Z"},
+                }
+            ),
+            "join": json.dumps(
+                [
+                    "linkedProduct",
+                    "linkedProduct.translations",
+                    "product",
+                    "product.translations",
+                ]
+            ),
         }
 
         response = await self.client.get(
             "/bookable-slots",
             params=params,
-            headers={"Authorization": f"{self.auth.token_type} {self.auth.access_token}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"{self.auth.token_type} {self.auth.access_token}",
+                "Content-Type": "application/json",
+            },
         )
         try:
             response.raise_for_status()
@@ -178,7 +181,9 @@ class USCClient:
         response.raise_for_status()
         return Member(**response.json())
 
-    def create_booking_data(self, member_id: int, members: List[str], slot: BookableSlot) -> BookingData:
+    def create_booking_data(
+        self, member_id: int, members: List[str], slot: BookableSlot
+    ) -> BookingData:
         """Create booking data for a slot.
 
         Args:
@@ -225,4 +230,4 @@ class USCClient:
 
     async def close(self) -> None:
         """Close the client."""
-        await self.client.aclose() 
+        await self.client.aclose()

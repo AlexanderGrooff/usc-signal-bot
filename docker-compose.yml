@@ -47,4 +47,4 @@ services:
 
 volumes:
   signal-data:
-  redis-data:  # Add Redis data volume 
+  redis-data:  # Add Redis data volume

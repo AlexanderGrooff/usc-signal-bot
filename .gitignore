@@ -54,4 +54,4 @@ commands.yaml
 
 # direnv
 .direnv/
-.envrc 
+.envrc

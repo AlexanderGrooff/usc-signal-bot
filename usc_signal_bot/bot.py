@@ -1,14 +1,10 @@
-
-
-
 import logging
 import os
 
+import yaml
 from signalbot import SignalBot
 
 from usc_signal_bot.commands import GetTimeslotsCommand, PingCommand
-import yaml
-
 from usc_signal_bot.config import Config
 
 

@@ -1,0 +1,30 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.8.0  # Use the latest stable version
+    hooks:
+      - id: black
+
+  - repo: https://github.com/myint/autoflake
+    rev: 'v2.3.1'
+    hooks:
+    -   id: autoflake
+        args: ["--in-place", "--remove-unused-variables", "--remove-all-unused-imports"]
+
+  - repo: https://github.com/pycqa/isort
+    rev: '5.13.2'
+    hooks:
+    -   id: isort
+        name: isort (python)
+
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.6.3  # Use the latest stable version
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0  # Use the latest stable version
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
