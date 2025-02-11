@@ -1,0 +1,21 @@
+bot:
+  # Signal Bot Configuration
+  signal_service: "signal-api:8080"
+  phone_number: "+1234567890"  # Replace with your number
+
+  # storage:
+  #   redis_host: "redis"
+  #   redis_port: 6379
+commands:
+  - name: ping
+    contacts:
+      - "+1234567890"  # Replace with your number
+    groups: true  # Read from all groups
+  - name: timeslots
+    contacts:
+      - "+1234567890"  # Replace with your number
+    groups: true  # Read from all groups
+
+usc:
+  username: "your_username"
+  password: "your_password"

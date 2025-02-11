@@ -1,0 +1,50 @@
+services:
+  signal-api:
+    image: bbernhard/signal-cli-rest-api:0.91
+    environment:
+      # - MODE=normal  # Run in normal mode (bind device with QR code)
+      - MODE=json-rpc  # Run in json-rpc mode (after binding device)
+      # - MODE=native
+      # - AUTO_RECEIVE_SCHEDULE=0 22 * * *  # Run auto-receive at 10:00 PM every day. See https://github.com/bbernhard/signal-cli-rest-api?tab=readme-ov-file#auto-receive-schedule
+    volumes:
+      - signal-data:/home/.local/share/signal-cli  # Signal data directory
+    ports:
+      - "8080:8080"  # REST API port
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes  # Enable persistence
+    volumes:
+      - redis-data:/data  # Persist Redis data
+    ports:
+      - "6379:6379"  # Redis port
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - ./usc_signal_bot:/app/usc_signal_bot
+      - ./main.py:/app/main.py
+    environment:
+      - CONFIG_FILE=/config/config.yaml
+    depends_on:
+      signal-api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  signal-data:
+  redis-data:  # Add Redis data volume 
