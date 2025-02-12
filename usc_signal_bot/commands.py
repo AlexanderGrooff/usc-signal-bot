@@ -2,11 +2,24 @@
 
 import logging
 from datetime import datetime
+from functools import wraps
 
 from signalbot import Command, Context, triggered
 
 from usc_signal_bot.config import USCCreds
-from usc_signal_bot.usc import USCClient
+from usc_signal_bot.usc import USCClient, format_slots
+
+
+def notify_error(func):
+    @wraps(func)
+    async def wrapper_notify_error(self, c: Context):
+        try:
+            return await func(self, c)
+        except Exception as e:
+            logging.error(f"Error in {func.__name__}: {e}")
+            await c.send(f"Error in {func.__name__}: {e}")
+
+    return wrapper_notify_error
 
 
 class PingCommand(Command):
@@ -41,29 +54,26 @@ class GetTimeslotsCommand(Command):
         logging.info("Describing GetTimeslotsCommand")
         return super().describe()
 
+    @notify_error
     @triggered("timeslots")
     async def handle(self, c: Context):
         logging.info(f"Received message: {c.message.text}")
         usc = USCClient()
-        try:
-            await usc.authenticate(self.usc_creds.username, self.usc_creds.password)
-            timeslots = await usc.get_slots(datetime.now())
 
-            # Format the response
-            available_slots = [
-                f"- {slot.startDate} - {slot.endDate}"
-                for slot in timeslots.data
-                if slot.isAvailable
-            ]
+        await usc.authenticate(self.usc_creds.username, self.usc_creds.password)
+        timeslots = await usc.get_slots("5 days later")
 
-            if available_slots:
-                response = "Available slots:\n" + "\n".join(available_slots)
-            else:
-                response = "No available slots found"
+        # Format the response
+        grouped_slots = format_slots(timeslots.data)
+        available_slots = [
+            f"- {start_date} - {slots[0].endDate} - {len(slots)} slots available"
+            for start_date, slots in grouped_slots.items()
+        ]
 
-            await c.send(response)
-        except Exception as e:
-            logging.error(f"Error getting timeslots: {e}")
-            await c.send(f"Error getting timeslots: {e}")
-        finally:
-            await usc.close()
+        if available_slots:
+            response = "Available slots:\n" + "\n".join(available_slots)
+        else:
+            response = "No available slots found"
+
+        await c.send(response)
+        await usc.close()

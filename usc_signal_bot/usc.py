@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -31,8 +31,8 @@ class Member(BaseModel):
 class BookableSlot(BaseModel):
     """USC bookable slot information."""
 
-    startDate: str
-    endDate: str
+    startDate: datetime
+    endDate: datetime
     isAvailable: bool
     linkedProductId: int  # Timeslot
     bookableProductId: int  # Squash court number
@@ -54,8 +54,8 @@ class BookingParams(BaseModel):
     bookableLinkedProductId: int
     bookableProductId: int
     clickedOnBook: bool
-    startDate: str
-    endDate: str
+    startDate: datetime
+    endDate: datetime
     invitedGuests: List[str]
     invitedMemberEmails: List[str]
     invitedOthers: List[str]
@@ -104,7 +104,7 @@ class USCClient:
         logging.info(f"Authenticated with USC: {self.auth}")
         return self.auth
 
-    async def get_slots(self, date: datetime) -> BookableSlotsResponse:
+    async def get_slots(self, natural_date: str) -> BookableSlotsResponse:
         """Get available slots for a date.
 
         Args:
@@ -116,12 +116,13 @@ class USCClient:
         if not self.auth:
             raise RuntimeError("Not authenticated")
 
-        next_week_wednesday = parse("6 days later")
-        if not next_week_wednesday:
-            raise RuntimeError("Failed to parse 6 days from now")
-        date_str = next_week_wednesday.strftime("%Y-%m-%d")
-        from_time = "00:00:00.000"
-        until_time = "23:00:00.000"
+        date = parse(natural_date)
+        if not date:
+            raise RuntimeError(f"Failed to parse date '{natural_date}'")
+
+        date_str = date.strftime("%Y-%m-%d")
+        from_time = "17:30:00.000"
+        until_time = "19:00:00.000"
 
         logging.info(f"Getting slots from {date_str}T{from_time}Z to {date_str}T{until_time}Z")
         params = {
@@ -130,16 +131,16 @@ class USCClient:
                     "startDate": f"{date_str}T{from_time}Z",
                     "endDate": f"{date_str}T{until_time}Z",
                     "tagIds": {"$in": [195]},
-                    "availableFromDate": {"$gt": f"{date_str}T{from_time}Z"},
-                    "availableTillDate": {"$lte": f"{date_str}T{until_time}Z"},
+                    # "availableFromDate": {"$gte": f"{date_str}T{from_time}Z"},
+                    # "availableTillDate": {"$lte": f"{date_str}T{until_time}Z"},
                 }
             ),
             "join": json.dumps(
                 [
                     "linkedProduct",
-                    "linkedProduct.translations",
+                    # "linkedProduct.translations",
                     "product",
-                    "product.translations",
+                    # "product.translations",
                 ]
             ),
         }
@@ -231,3 +232,41 @@ class USCClient:
     async def close(self) -> None:
         """Close the client."""
         await self.client.aclose()
+
+
+def format_slot_date(date: datetime, date_offset: timedelta | None = None) -> datetime:
+    """Format a slot date.
+
+    Args:
+        date_str: Date string
+        date_offset: Date offset
+
+    Returns:
+        datetime: Formatted date
+    """
+    # There seems to be an offset of 15 minutes in the startDate. No idea why.
+    date_offset = date_offset or timedelta(minutes=15)
+    return date + date_offset
+
+
+def format_slots(
+    slots: List[BookableSlot], date_offset: timedelta | None = None
+) -> Dict[str, List[BookableSlot]]:
+    """Group slots by start time, filter out unavailable slots, and format the dates.
+
+    Args:
+        slots: List of slots
+
+    Returns:
+        Dict[str, List[BookableSlot]]: Grouped slots
+    """
+    grouped = {}
+    for slot in slots:
+        if not slot.isAvailable:
+            continue
+        slot.startDate = format_slot_date(slot.startDate, date_offset)
+        slot.endDate = format_slot_date(slot.endDate, date_offset)
+        if slot.startDate not in grouped:
+            grouped[slot.startDate] = []
+        grouped[slot.startDate].append(slot)
+    return grouped
