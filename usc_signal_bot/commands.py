@@ -24,6 +24,16 @@ def notify_error(func):
     return wrapper_notify_error
 
 
+def ignore_non_text_messages(func):
+    @wraps(func)
+    async def wrapper_ignore_non_text_messages(self, c: Context):
+        if not isinstance(c.message.text, str):
+            return
+        return await func(self, c)
+
+    return wrapper_ignore_non_text_messages
+
+
 class PingCommand(Command):
     """Simple ping command that responds with the current time."""
 
@@ -35,6 +45,7 @@ class PingCommand(Command):
         logging.info("Describing PingCommand")
         return super().describe()
 
+    @ignore_non_text_messages
     @notify_error
     @triggered("ping")
     async def handle(self, c: Context):
@@ -58,10 +69,12 @@ class GetTimeslotsCommand(Command):
         logging.info("Describing GetTimeslotsCommand")
         return super().describe()
 
+    @ignore_non_text_messages
     @notify_error
     async def handle(self, c: Context):
-        if not isinstance(c.message.text, str) or not c.message.text.startswith("timeslots"):
+        if not c.message.text.startswith("timeslots"):
             return
+
         match = self.message_pattern.match(c.message.text)
         if not match:
             await c.send(
@@ -116,9 +129,10 @@ class BookTimeslotCommand(Command):
         logging.info("Describing BookTimeslotCommand")
         return super().describe()
 
+    @ignore_non_text_messages
     @notify_error
     async def handle(self, c: Context):
-        if not isinstance(c.message.text, str) or not c.message.text.startswith("book"):
+        if not c.message.text.startswith("book"):
             return
         logging.info(f"Received message: {c.message.text}")
         match = self.message_pattern.match(c.message.text)
