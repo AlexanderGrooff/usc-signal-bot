@@ -48,6 +48,7 @@ class GetTimeslotsCommand(Command):
     def __init__(self, usc_creds: USCCreds):
         super().__init__()
         self.usc_creds = usc_creds
+        self.message_pattern = re.compile(r"^timeslots(\s+\d{4}-\d{2}-\d{2})?$", re.IGNORECASE)
 
     def setup(self):
         logging.info("Setting up GetTimeslotsCommand")
@@ -58,13 +59,27 @@ class GetTimeslotsCommand(Command):
         return super().describe()
 
     @notify_error
-    @triggered("timeslots")
     async def handle(self, c: Context):
+        if not c.message.text.startswith("timeslots"):
+            return
+        match = self.message_pattern.match(c.message.text)
+        if not match:
+            await c.send(
+                "Invalid message format. Please use the following format:\ntimeslots <date?>"
+            )
+            return
         logging.info(f"Received message: {c.message.text}")
-        usc = USCClient()
 
+        # By default timeslots are released 6 days in advance
+        date_str = match.group(1)
+        date = parse(date_str or "6 days later")
+        if not date:
+            await c.send("Invalid date format. Please use the following format:\ntimeslots <date?>")
+            return
+
+        usc = USCClient()
         await usc.authenticate(self.usc_creds.username, self.usc_creds.password)
-        timeslots = await usc.get_slots("6 days later")
+        timeslots = await usc.get_slots(date)
 
         # Format the response
         grouped_slots = usc.format_slots(timeslots.data)
@@ -73,10 +88,11 @@ class GetTimeslotsCommand(Command):
             for slots in grouped_slots.values()
         ]
 
+        day_str = date.strftime("%A %Y-%m-%d")
         if available_slots:
-            response = "Available slots:\n" + "\n".join(available_slots)
+            response = f"Available slots for **{day_str}**:\n" + "\n".join(available_slots)
         else:
-            response = "No available slots found"
+            response = f"No available slots found for **{day_str}**"
 
         await c.send(response, text_mode="styled")
         await usc.close()
