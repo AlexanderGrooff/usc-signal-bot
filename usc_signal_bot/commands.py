@@ -24,14 +24,25 @@ def notify_error(func):
     return wrapper_notify_error
 
 
-def ignore_non_text_messages(func):
-    @wraps(func)
-    async def wrapper_ignore_non_text_messages(self, c: Context):
-        if not isinstance(c.message.text, str):
-            return
-        return await func(self, c)
+def ignore_unrelated_messages(start_word, case_sensitive=False):
+    def decorator_ignore_unrelated_messages(func):
+        @wraps(func)
+        async def wrapper_ignore_unrelated_messages(self, c: Context):
+            text = c.message.text
+            if not isinstance(text, str):
+                return
 
-    return wrapper_ignore_non_text_messages
+            if not case_sensitive:
+                text = text.lower()
+            if not text.startswith(start_word):
+                logging.info(f"Ignoring unrelated message: {text}, expected {start_word}")
+                return
+
+            return await func(self, c)
+
+        return wrapper_ignore_unrelated_messages
+
+    return decorator_ignore_unrelated_messages
 
 
 class PingCommand(Command):
@@ -45,7 +56,6 @@ class PingCommand(Command):
         logging.info("Describing PingCommand")
         return super().describe()
 
-    @ignore_non_text_messages
     @notify_error
     @triggered("ping")
     async def handle(self, c: Context):
@@ -69,12 +79,9 @@ class GetTimeslotsCommand(Command):
         logging.info("Describing GetTimeslotsCommand")
         return super().describe()
 
-    @ignore_non_text_messages
+    @ignore_unrelated_messages("timeslots")
     @notify_error
     async def handle(self, c: Context):
-        if not c.message.text.startswith("timeslots"):
-            return
-
         match = self.message_pattern.match(c.message.text)
         if not match:
             await c.send(
@@ -83,9 +90,12 @@ class GetTimeslotsCommand(Command):
             return
         logging.info(f"Received message: {c.message.text}")
 
-        # By default timeslots are released 6 days in advance
         date_str = match.group(1)
-        date = parse(date_str or "6 days later")
+        if date_str:
+            date = parse(date_str.strip())
+        else:
+            # By default timeslots are released 6 days in advance
+            date = parse("6 days later")
         if not date:
             await c.send("Invalid date format. Please use the following format:\ntimeslots <date?>")
             return
@@ -129,11 +139,9 @@ class BookTimeslotCommand(Command):
         logging.info("Describing BookTimeslotCommand")
         return super().describe()
 
-    @ignore_non_text_messages
+    @ignore_unrelated_messages("book")
     @notify_error
     async def handle(self, c: Context):
-        if not c.message.text.startswith("book"):
-            return
         logging.info(f"Received message: {c.message.text}")
         match = self.message_pattern.match(c.message.text)
         if not match:

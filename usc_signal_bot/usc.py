@@ -268,7 +268,10 @@ class USCClient:
         """
         slots = await self.get_slots(date)
         grouped_slots = self.format_slots(slots.data)
-        return grouped_slots[_to_dict_key(date)][0]
+        try:
+            return grouped_slots[_to_dict_key(date)][0]
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(f"No available slot found for {date}") from e
 
     def format_slots(
         self, slots: List[BookableSlot], date_offset: timedelta | None = None
