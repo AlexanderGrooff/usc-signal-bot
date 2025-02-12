@@ -60,7 +60,7 @@ class GetTimeslotsCommand(Command):
 
     @notify_error
     async def handle(self, c: Context):
-        if not c.message.text.startswith("timeslots"):
+        if not isinstance(c.message.text, str) or not c.message.text.startswith("timeslots"):
             return
         match = self.message_pattern.match(c.message.text)
         if not match:
@@ -118,10 +118,10 @@ class BookTimeslotCommand(Command):
 
     @notify_error
     async def handle(self, c: Context):
-        match = self.message_pattern.match(c.message.text)
-        if not c.message.text.startswith("book"):
+        if not isinstance(c.message.text, str) or not c.message.text.startswith("book"):
             return
         logging.info(f"Received message: {c.message.text}")
+        match = self.message_pattern.match(c.message.text)
         if not match:
             await c.send(
                 "Invalid message format. Please use the following format:\nbook <date> <time> <email1> <email2?> <email3?>"
