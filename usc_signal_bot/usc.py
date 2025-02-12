@@ -78,6 +78,8 @@ class USCClient:
     """USC API client."""
 
     BASE_URL = "https://backbone-web-api.production.uva.delcom.nl"
+    FROM_TIME = "17:30:00.000"
+    UNTIL_TIME = "19:00:00.000"
 
     def __init__(self) -> None:
         """Initialize the USC client."""
@@ -121,26 +123,22 @@ class USCClient:
             raise RuntimeError(f"Failed to parse date '{natural_date}'")
 
         date_str = date.strftime("%Y-%m-%d")
-        from_time = "17:30:00.000"
-        until_time = "19:00:00.000"
 
-        logging.info(f"Getting slots from {date_str}T{from_time}Z to {date_str}T{until_time}Z")
+        logging.info(
+            f"Getting slots from {date_str}T{self.FROM_TIME}Z to {date_str}T{self.UNTIL_TIME}Z"
+        )
         params = {
             "s": json.dumps(
                 {
-                    "startDate": f"{date_str}T{from_time}Z",
-                    "endDate": f"{date_str}T{until_time}Z",
+                    "startDate": f"{date_str}T{self.FROM_TIME}Z",
+                    "endDate": f"{date_str}T{self.UNTIL_TIME}Z",
                     "tagIds": {"$in": [195]},
-                    # "availableFromDate": {"$gte": f"{date_str}T{from_time}Z"},
-                    # "availableTillDate": {"$lte": f"{date_str}T{until_time}Z"},
                 }
             ),
             "join": json.dumps(
                 [
                     "linkedProduct",
-                    # "linkedProduct.translations",
                     "product",
-                    # "product.translations",
                 ]
             ),
         }
@@ -233,9 +231,39 @@ class USCClient:
         """Close the client."""
         await self.client.aclose()
 
+    def format_slots(
+        self, slots: List[BookableSlot], date_offset: timedelta | None = None
+    ) -> Dict[datetime, List[BookableSlot]]:
+        """Group slots by start time, filter out unavailable slots, and format the dates.
 
-def format_slot_date(date: datetime, date_offset: timedelta | None = None) -> datetime:
-    """Format a slot date.
+        Args:
+            slots: List of slots
+
+        Returns:
+            Dict[str, List[BookableSlot]]: Grouped slots, sorted by start date
+        """
+        grouped = {}
+        from_time = datetime.strptime(self.FROM_TIME, "%H:%M:%S.%f").time()
+        until_time = datetime.strptime(self.UNTIL_TIME, "%H:%M:%S.%f").time()
+        for slot in slots:
+            if not slot.isAvailable:
+                continue
+            slot.startDate = offset_slot_date(slot.startDate, date_offset)
+            slot.endDate = offset_slot_date(slot.endDate, date_offset)
+
+            # Filter out slots that are not in the range of start/end times
+            slot_time = slot.startDate.time()
+            if slot_time < from_time or slot_time > until_time:
+                continue
+
+            if slot.startDate not in grouped:
+                grouped[slot.startDate] = []
+            grouped[slot.startDate].append(slot)
+        return dict(sorted(grouped.items()))
+
+
+def offset_slot_date(date: datetime, date_offset: timedelta | None = None) -> datetime:
+    """Offset a slot date.
 
     Args:
         date_str: Date string
@@ -249,24 +277,13 @@ def format_slot_date(date: datetime, date_offset: timedelta | None = None) -> da
     return date + date_offset
 
 
-def format_slots(
-    slots: List[BookableSlot], date_offset: timedelta | None = None
-) -> Dict[str, List[BookableSlot]]:
-    """Group slots by start time, filter out unavailable slots, and format the dates.
+def format_slot_date(date: datetime) -> str:
+    """Format a slot date.
 
     Args:
-        slots: List of slots
+        date: Date
 
     Returns:
-        Dict[str, List[BookableSlot]]: Grouped slots
+        str: Formatted date
     """
-    grouped = {}
-    for slot in slots:
-        if not slot.isAvailable:
-            continue
-        slot.startDate = format_slot_date(slot.startDate, date_offset)
-        slot.endDate = format_slot_date(slot.endDate, date_offset)
-        if slot.startDate not in grouped:
-            grouped[slot.startDate] = []
-        grouped[slot.startDate].append(slot)
-    return grouped
+    return date.strftime("%Y-%m-%d %H:%M")

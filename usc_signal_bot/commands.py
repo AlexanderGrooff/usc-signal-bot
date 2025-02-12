@@ -7,7 +7,7 @@ from functools import wraps
 from signalbot import Command, Context, triggered
 
 from usc_signal_bot.config import USCCreds
-from usc_signal_bot.usc import USCClient, format_slots
+from usc_signal_bot.usc import USCClient, format_slot_date
 
 
 def notify_error(func):
@@ -64,9 +64,9 @@ class GetTimeslotsCommand(Command):
         timeslots = await usc.get_slots("5 days later")
 
         # Format the response
-        grouped_slots = format_slots(timeslots.data)
+        grouped_slots = usc.format_slots(timeslots.data)
         available_slots = [
-            f"- {start_date} - {slots[0].endDate} - {len(slots)} slots available"
+            f"- {format_slot_date(start_date)} - {format_slot_date(slots[0].endDate)} - {len(slots)} slots available"
             for start_date, slots in grouped_slots.items()
         ]
 
