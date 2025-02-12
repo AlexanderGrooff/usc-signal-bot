@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from dateparser import parse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 
 class Auth(BaseModel):
@@ -62,16 +62,21 @@ class BookingParams(BaseModel):
     secondaryPurchaseMessage: Optional[str] = None
     primaryPurchaseMessage: Optional[str] = None
 
+    @field_serializer("startDate")
+    @field_serializer("endDate")
+    def format_timestamp(self, value: datetime) -> str:
+        return value.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
 
 class BookingData(BaseModel):
     """USC booking data."""
 
+    organizationId: Optional[str] = None
     memberId: int
+    primaryPurchaseMessage: Optional[str] = None
+    secondaryPurchaseMessage: Optional[str] = None
     params: BookingParams
     dateOfRegistration: Optional[str] = None
-    organizationId: Optional[str] = None
-    secondaryPurchaseMessage: Optional[str] = None
-    primaryPurchaseMessage: Optional[str] = None
 
 
 class USCClient:
@@ -106,7 +111,7 @@ class USCClient:
         logging.info(f"Authenticated with USC: {self.auth}")
         return self.auth
 
-    async def get_slots(self, natural_date: str) -> BookableSlotsResponse:
+    async def get_slots(self, date: str | datetime) -> BookableSlotsResponse:
         """Get available slots for a date.
 
         Args:
@@ -118,9 +123,11 @@ class USCClient:
         if not self.auth:
             raise RuntimeError("Not authenticated")
 
-        date = parse(natural_date)
-        if not date:
-            raise RuntimeError(f"Failed to parse date '{natural_date}'")
+        if isinstance(date, str):
+            parsed_date = parse(date)
+            if not parsed_date:
+                raise RuntimeError(f"Failed to parse date '{date}'")
+            date = parsed_date
 
         date_str = date.strftime("%Y-%m-%d")
 
@@ -156,7 +163,7 @@ class USCClient:
         except httpx.HTTPStatusError as e:
             logging.error(f"Error getting slots: {e}")
             logging.error(f"Response: {response.text}")
-            raise e
+            raise RuntimeError(f"Error getting slots: {e}; response: {response.text}") from e
         data = response.json()
 
         # Convert the raw slots to BookableSlot objects
@@ -175,9 +182,17 @@ class USCClient:
         response = await self.client.get(
             "/auth",
             params={"cf": 0},
-            headers={"Authorization": f"{self.auth.token_type} {self.auth.access_token}"},
+            headers={
+                "Authorization": f"{self.auth.token_type} {self.auth.access_token}",
+                "Content-Type": "application/json",
+            },
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logging.error(f"Error getting member: {e}")
+            logging.error(f"Response: {response.text}")
+            raise RuntimeError(f"Error getting member: {e}; response: {response.text}") from e
         return Member(**response.json())
 
     def create_booking_data(
@@ -221,19 +236,43 @@ class USCClient:
 
         response = await self.client.post(
             "/participations",
-            json=booking_data.model_dump(by_alias=True),
-            headers={"Authorization": f"{self.auth.token_type} {self.auth.access_token}"},
+            # json=booking_data.model_dump_json(),
+            data=booking_data.model_dump_json(),  # type: ignore
+            headers={
+                "Authorization": f"{self.auth.token_type} {self.auth.access_token}",
+                "Content-Type": "application/json",
+            },
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logging.error(f"Error booking slot: {e}")
+            logging.error(f"Response: {response.text}")
+            raise RuntimeError(
+                f"Error booking slot: {e}; response: {response.text}; booking data: {booking_data.model_dump_json()}"
+            ) from e
         return response.json()
 
     async def close(self) -> None:
         """Close the client."""
         await self.client.aclose()
 
+    async def get_matching_slot(self, date: datetime) -> Optional[BookableSlot]:
+        """Get the first matching slot for a date.
+
+        Args:
+            date: Date to get matching slot for
+
+        Returns:
+            Optional[BookableSlot]: Matching slot
+        """
+        slots = await self.get_slots(date)
+        grouped_slots = self.format_slots(slots.data)
+        return grouped_slots[_to_dict_key(date)][0]
+
     def format_slots(
         self, slots: List[BookableSlot], date_offset: timedelta | None = None
-    ) -> Dict[datetime, List[BookableSlot]]:
+    ) -> Dict[str, List[BookableSlot]]:
         """Group slots by start time, filter out unavailable slots, and format the dates.
 
         Args:
@@ -257,8 +296,8 @@ class USCClient:
                 continue
 
             if slot.startDate not in grouped:
-                grouped[slot.startDate] = []
-            grouped[slot.startDate].append(slot)
+                grouped[_to_dict_key(slot.startDate)] = []
+            grouped[_to_dict_key(slot.startDate)].append(slot)
         return dict(sorted(grouped.items()))
 
 
@@ -275,6 +314,11 @@ def offset_slot_date(date: datetime, date_offset: timedelta | None = None) -> da
     # There seems to be an offset of 15 minutes in the startDate. No idea why.
     date_offset = date_offset or timedelta(minutes=15)
     return date + date_offset
+
+
+def _to_dict_key(date: datetime) -> str:
+    """Convert a datetime to a dict key. Useful for grouping slots by date without timezone."""
+    return date.strftime("%Y-%m-%d %H:%M")
 
 
 def format_slot_date(date: datetime) -> str:

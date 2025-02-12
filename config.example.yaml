@@ -15,6 +15,10 @@ commands:
     contacts:
       - "+1234567890"  # Replace with your number
     groups: true  # Read from all groups
+  - name: book
+    contacts:
+      - "+1234567890"  # Replace with your number
+    groups: true  # Read from all groups
 
 usc:
   username: "your_username"
