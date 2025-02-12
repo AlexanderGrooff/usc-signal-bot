@@ -33,6 +33,7 @@ class PingCommand(Command):
         logging.info("Describing PingCommand")
         return super().describe()
 
+    @notify_error
     @triggered("ping")
     async def handle(self, c: Context):
         logging.info(f"Received message: {c.message.text}")
@@ -66,7 +67,7 @@ class GetTimeslotsCommand(Command):
         # Format the response
         grouped_slots = usc.format_slots(timeslots.data)
         available_slots = [
-            f"- {format_slot_date(start_date)} - {format_slot_date(slots[0].endDate)} - {len(slots)} slots available"
+            f"- {format_slot_date(start_date)} - {format_slot_date(slots[0].endDate)} - **{len(slots)} slots available**"
             for start_date, slots in grouped_slots.items()
         ]
 
@@ -75,5 +76,5 @@ class GetTimeslotsCommand(Command):
         else:
             response = "No available slots found"
 
-        await c.send(response)
+        await c.send(response, text_mode="styled")
         await usc.close()
