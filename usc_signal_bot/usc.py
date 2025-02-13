@@ -10,7 +10,10 @@ import httpx
 from dateparser import parse
 from pydantic import BaseModel, field_serializer
 
+# All chat-input dates are in Amsterdam timezone.
+# All dates in the USC API are in UTC.
 AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
+UTC_TZ = ZoneInfo("UTC")
 
 
 class Auth(BaseModel):
@@ -65,10 +68,9 @@ class BookingParams(BaseModel):
     secondaryPurchaseMessage: Optional[str] = None
     primaryPurchaseMessage: Optional[str] = None
 
-    @field_serializer("startDate")
-    @field_serializer("endDate")
+    @field_serializer("startDate", "endDate")
     def format_timestamp(self, value: datetime) -> str:
-        return value.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        return value.astimezone(UTC_TZ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 class BookingData(BaseModel):
@@ -118,7 +120,7 @@ class USCClient:
         """Get available slots for a date.
 
         Args:
-            date: Date to get slots for
+            date: Date to get slots for (in Amsterdam timezone)
 
         Returns:
             BookableSlotsResponse: Available slots
@@ -127,12 +129,17 @@ class USCClient:
             raise RuntimeError("Not authenticated")
 
         if isinstance(date, str):
-            parsed_date = parse(date)
+            parsed_date = parse(date, settings={"TIMEZONE": "Europe/Amsterdam"})
             if not parsed_date:
                 raise RuntimeError(f"Failed to parse date '{date}'")
-            date = parsed_date
+            date = parsed_date.replace(tzinfo=AMSTERDAM_TZ)
+        elif date.tzinfo is None:
+            # If datetime has no timezone, assume it's Amsterdam time
+            date = date.replace(tzinfo=AMSTERDAM_TZ)
 
-        date_str = date.strftime("%Y-%m-%d")
+        # Convert to UTC for API request
+        utc_date = date.astimezone(UTC_TZ)
+        date_str = utc_date.strftime("%Y-%m-%d")
 
         logging.info(
             f"Getting slots from {date_str}T{self.FROM_TIME}Z to {date_str}T{self.UNTIL_TIME}Z"
@@ -264,11 +271,17 @@ class USCClient:
         """Get the first matching slot for a date.
 
         Args:
-            date: Date to get matching slot for
+            date: Date to get matching slot for (in Amsterdam timezone)
 
         Returns:
             Optional[BookableSlot]: Matching slot
         """
+        # Ensure date has timezone info
+        if date.tzinfo is None:
+            date = date.replace(tzinfo=AMSTERDAM_TZ)
+        elif date.tzinfo != AMSTERDAM_TZ:
+            date = date.astimezone(AMSTERDAM_TZ)
+
         slots = await self.get_slots(date)
         grouped_slots = self.format_slots(slots.data)
         try:
@@ -318,7 +331,7 @@ def offset_slot_date(date: datetime) -> datetime:
     """
     # Convert to Amsterdam timezone
     if date.tzinfo is None:
-        date = date.replace(tzinfo=ZoneInfo("UTC"))
+        date = date.replace(tzinfo=UTC_TZ)
     return date.astimezone(AMSTERDAM_TZ)
 
 
