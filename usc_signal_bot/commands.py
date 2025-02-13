@@ -1,6 +1,7 @@
 """Signal bot commands."""
 
 import logging
+import os
 import re
 from datetime import datetime
 from functools import wraps
@@ -8,8 +9,9 @@ from functools import wraps
 from dateparser import parse
 from signalbot import Command, Context, triggered
 
+from usc_signal_bot._version import __version__
 from usc_signal_bot.config import USCCreds
-from usc_signal_bot.usc import USCClient, format_slot_date
+from usc_signal_bot.usc import AMSTERDAM_TZ, USCClient, format_slot_date
 
 
 def notify_error(func):
@@ -45,6 +47,16 @@ def ignore_unrelated_messages(start_word, case_sensitive=False):
     return decorator_ignore_unrelated_messages
 
 
+def get_version() -> str:
+    """Get the current version from package metadata."""
+    return __version__
+
+
+def get_hostname() -> str:
+    """Get the hostname, preferring HOSTNAME env var over socket.gethostname()."""
+    return os.getenv("HOSTNAME", "unknown")
+
+
 class PingCommand(Command):
     """Simple ping command that responds with the current time."""
 
@@ -60,7 +72,9 @@ class PingCommand(Command):
     @triggered("ping")
     async def handle(self, c: Context):
         logging.info(f"Received message: {c.message.text}")
-        await c.send(f"Pong {datetime.now()}")
+        hostname = get_hostname()
+        version = get_version()
+        await c.send(f"Pong {datetime.now(AMSTERDAM_TZ)} - {hostname} - v{version}")
 
 
 class GetTimeslotsCommand(Command):

@@ -1,6 +1,15 @@
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm>=6.4"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "node-and-date"
+write_to = "usc_signal_bot/_version.py"
+
 [project]
 name = "usc-signal-bot"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Signal messenger bot for USC gym reservations"
 readme = "README.md"
 requires-python = ">=3.12"

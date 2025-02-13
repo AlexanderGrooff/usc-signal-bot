@@ -1,6 +1,3 @@
-# Generated version file
-usc_signal_bot/_version.py
-
 # Python
 __pycache__/
 *.py[cod]
@@ -24,10 +21,11 @@ wheels/
 *.egg
 
 # Virtual Environment
-venv/
+.env
+.venv
 env/
+venv/
 ENV/
-.venv/
 
 # IDE
 .idea/
@@ -44,10 +42,6 @@ htmlcov/
 # Signal data
 signal/
 
-# direnv
-.direnv/
-.envrc
-
 # Environment
 .env
 .env.*
@@ -55,6 +49,5 @@ signal/
 config.yaml
 commands.yaml
 
-# direnv
-.direnv/
-.envrc
+# Keep .git directory for version detection
+!.git/
