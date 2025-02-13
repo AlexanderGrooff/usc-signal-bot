@@ -2,12 +2,15 @@
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 from dateparser import parse
 from pydantic import BaseModel, field_serializer
+
+AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
 
 
 class Auth(BaseModel):
@@ -273,9 +276,7 @@ class USCClient:
         except (KeyError, IndexError) as e:
             raise RuntimeError(f"No available slot found for {date}") from e
 
-    def format_slots(
-        self, slots: List[BookableSlot], date_offset: timedelta | None = None
-    ) -> Dict[str, List[BookableSlot]]:
+    def format_slots(self, slots: List[BookableSlot]) -> Dict[str, List[BookableSlot]]:
         """Group slots by start time, filter out unavailable slots, and format the dates.
 
         Args:
@@ -290,33 +291,35 @@ class USCClient:
         for slot in slots:
             if not slot.isAvailable:
                 continue
-            slot.startDate = offset_slot_date(slot.startDate, date_offset)
-            slot.endDate = offset_slot_date(slot.endDate, date_offset)
+            copiedSlot = slot.model_copy()
+            copiedSlot.startDate = offset_slot_date(copiedSlot.startDate)
+            copiedSlot.endDate = offset_slot_date(copiedSlot.endDate)
 
             # Filter out slots that are not in the range of start/end times
-            slot_time = slot.startDate.time()
+            slot_time = copiedSlot.startDate.time()
             if slot_time < from_time or slot_time > until_time:
                 continue
 
-            if slot.startDate not in grouped:
-                grouped[_to_dict_key(slot.startDate)] = []
-            grouped[_to_dict_key(slot.startDate)].append(slot)
+            if _to_dict_key(copiedSlot.startDate) not in grouped:
+                grouped[_to_dict_key(copiedSlot.startDate)] = []
+            grouped[_to_dict_key(copiedSlot.startDate)].append(copiedSlot)
         return dict(sorted(grouped.items()))
 
 
-def offset_slot_date(date: datetime, date_offset: timedelta | None = None) -> datetime:
-    """Offset a slot date.
+def offset_slot_date(date: datetime) -> datetime:
+    """Offset a slot date and convert to Amsterdam timezone.
 
     Args:
         date_str: Date string
         date_offset: Date offset
 
     Returns:
-        datetime: Formatted date
+        datetime: Formatted date in Amsterdam timezone
     """
-    # There seems to be an offset of 15 minutes in the startDate. No idea why.
-    date_offset = date_offset or timedelta(minutes=15)
-    return date + date_offset
+    # Convert to Amsterdam timezone
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=ZoneInfo("UTC"))
+    return date.astimezone(AMSTERDAM_TZ)
 
 
 def _to_dict_key(date: datetime) -> str:
