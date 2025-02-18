@@ -20,11 +20,17 @@ class CommandConfig(BaseModel):
     groups: Union[List[str], bool] = False
 
 
-class USCCreds(BaseModel):
-    """Credentials for the USC API."""
+class BookingMember(BaseModel):
+    """Credentials for a single USC member."""
 
     username: str
     password: str
+
+
+class USCCreds(BaseModel):
+    """Credentials for the USC API."""
+
+    bookingMembers: List[BookingMember]
 
 
 class Config(BaseModel):

@@ -21,5 +21,9 @@ commands:
     groups: true  # Read from all groups
 
 usc:
-  username: "your_username"
-  password: "your_password"
+  bookingMembers:
+    - username: "your_username1"
+      password: "your_password1"
+    - username: "your_username2"
+      password: "your_password2"
+    # Add more booking members as needed

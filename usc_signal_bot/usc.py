@@ -218,6 +218,9 @@ class USCClient:
         Returns:
             BookingData: Booking data
         """
+        # 2 members and the member making the booking
+        assert len(members) <= 2, "Only 2 members can be invited to a slot"
+
         return BookingData(
             memberId=member_id,
             params=BookingParams(
