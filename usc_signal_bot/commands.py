@@ -5,9 +5,11 @@ import logging
 import math
 import os
 import re
+import shlex
+from argparse import ArgumentError, ArgumentParser, Namespace
 from datetime import datetime
 from functools import wraps
-from typing import List
+from typing import List, Optional
 
 from dateparser import parse
 from signalbot import Command, Context, triggered
@@ -35,6 +37,7 @@ def ignore_unrelated_messages(start_word, case_sensitive=False):
         async def wrapper_ignore_unrelated_messages(self, c: Context):
             text = c.message.text
             if not isinstance(text, str):
+                logging.debug(f"Ignoring unrelated message: {text}, expected {start_word}")
                 return
 
             if not case_sensitive:
@@ -150,9 +153,41 @@ class BookTimeslotCommand(Command):
     def __init__(self, usc_creds: USCCreds):
         super().__init__()
         self.usc_creds = usc_creds
-        self.message_pattern = re.compile(
-            r"^book\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s+(.+@.+\..+\s*)+$", re.IGNORECASE
+        self.parser = self._create_parser()
+
+    async def log(self, context: Context, message: str):
+        logging.info(message)
+        try:
+            await context.send(message, text_mode="styled")
+        except Exception as e:
+            logging.exception(f"Error sending message: {e}")
+
+    def _create_parser(self) -> ArgumentParser:
+        """Create the argument parser for the book command."""
+        parser = ArgumentParser(
+            prog="book",
+            description="Book a timeslot at USC",
+            add_help=False,  # We'll handle help ourselves
         )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Simulate booking without actually making the reservation",
+        )
+        parser.add_argument(
+            "date",
+            help="Date to book (YYYY-MM-DD)",
+        )
+        parser.add_argument(
+            "time",
+            help="Time to book (HH:MM)",
+        )
+        parser.add_argument(
+            "members",
+            nargs="+",
+            help="Email addresses of members to book for",
+        )
+        return parser
 
     def setup(self):
         logging.info("Setting up BookTimeslotCommand")
@@ -163,7 +198,11 @@ class BookTimeslotCommand(Command):
         return super().describe()
 
     async def _make_booking(
-        self, date: datetime, members: List[str], booking_member: BookingMember
+        self,
+        date: datetime,
+        members: List[str],
+        booking_member: BookingMember,
+        dry_run: bool = False,
     ) -> str:
         """Make a booking with a specific member's credentials.
 
@@ -171,6 +210,7 @@ class BookTimeslotCommand(Command):
             date: Date to book
             members: List of member emails to invite (max 2)
             booking_member: Credentials to use for booking
+            dry_run: If True, only simulate the booking without actually making it
 
         Returns:
             str: Booking response message
@@ -185,10 +225,13 @@ class BookTimeslotCommand(Command):
             booking_member_info = await usc.get_member()
             booking_data = usc.create_booking_data(booking_member_info.id, members, slot=slot)
 
+            if dry_run:
+                return f"[DRY RUN] Would book slot {format_slot_date(slot.startDate)} - {format_slot_date(slot.endDate)} with {booking_member.username} for members {', '.join(members)}"
+
             await usc.book_slot(booking_data)
             return f"Booking successful with {booking_member.username} for members {', '.join(members)}"
         except Exception as e:
-            return f"Booking failed with {booking_member.username}: {str(e)}"
+            return f"{'[DRY RUN] ' if dry_run else ''}Booking failed with {booking_member.username}: {str(e)}"
         finally:
             await usc.close()
 
@@ -235,31 +278,47 @@ class BookTimeslotCommand(Command):
 
         return allocations
 
+    def _parse_args(self, text: str) -> Optional[Namespace]:
+        """Parse command arguments from text.
+
+        Args:
+            text: Command text to parse
+
+        Returns:
+            Optional[Namespace]: Parsed arguments or None if help requested
+        """
+        # Remove the command name and split into args
+        args_str = re.sub(r"^book\s+", "", text.strip(), flags=re.IGNORECASE)
+        try:
+            args = shlex.split(args_str)
+            if "--help" in args or "-h" in args:
+                return None
+            return self.parser.parse_args(args)
+        except (ArgumentError, ValueError, SystemExit) as e:
+            raise RuntimeError(f"Error parsing arguments: {str(e)}") from e
+
     @ignore_unrelated_messages("book")
     @notify_error
     async def handle(self, c: Context):
         logging.info(f"Received message: {c.message.text}")
-        match = self.message_pattern.match(c.message.text)
-        if not match:
-            await c.send(
-                "Invalid message format. Please use the following format:\nbook <date> <time> <email1> <email2> ..."
-            )
-            return
-
-        date_str = match.group(1)
-        time_str = match.group(2)
-        members = [m.strip() for m in match.group(3).split() if m.strip()]
-        date = parse(f"{date_str} {time_str}")
-        if not date:
-            raise RuntimeError(f"Failed to parse date '{date_str} {time_str}'")
 
         try:
+            args = self._parse_args(c.message.text)
+            if args is None:
+                # Help requested
+                await self.log(c, self.parser.format_help())
+                return
+
+            date = parse(f"{args.date} {args.time}")
+            if not date:
+                raise RuntimeError(f"Failed to parse date '{args.date} {args.time}'")
+
             # Allocate bookings smartly
-            allocations = self._allocate_bookings(members)
+            allocations = self._allocate_bookings(args.members)
 
             # Make bookings in parallel
             booking_tasks = [
-                self._make_booking(date, members_to_book, booking_member)
+                self._make_booking(date, members_to_book, booking_member, args.dry_run)
                 for booking_member, members_to_book in allocations
             ]
 
@@ -267,7 +326,10 @@ class BookTimeslotCommand(Command):
             booking_results = await asyncio.gather(*booking_tasks)
 
             # Send combined response
-            response = "Booking Results:\n" + "\n".join(f"- {result}" for result in booking_results)
-            await c.send(response, text_mode="styled")
-        except RuntimeError as e:
-            await c.send(str(e))
+            prefix = "[DRY RUN] " if args.dry_run else ""
+            response = f"{prefix}Booking Results:\n" + "\n".join(
+                f"- {result}" for result in booking_results
+            )
+            await self.log(c, response)
+        except (RuntimeError, ArgumentError) as e:
+            await self.log(c, str(e))

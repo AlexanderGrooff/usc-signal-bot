@@ -2,6 +2,9 @@
 
 import unittest
 from typing import List, Tuple
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from signalbot import Context
 
 from usc_signal_bot.commands import BookTimeslotCommand
 from usc_signal_bot.config import BookingMember, USCCreds
@@ -111,6 +114,121 @@ class TestBookingAllocation(unittest.TestCase):
     def _allocate(self, members: List[str]) -> List[Tuple[str, List[str]]]:
         """Helper method to allocate bookings and format results."""
         return format_allocation(self.command._allocate_bookings(members))
+
+
+class TestArgumentParsing(unittest.TestCase):
+    """Test cases for argument parsing."""
+
+    def setUp(self):
+        """Set up test cases."""
+        self.command = BookTimeslotCommand(
+            create_test_creds(["john@usc.nl", "sarah@usc.nl", "mike@usc.nl"])
+        )
+
+    def test_basic_booking_command(self):
+        """Test parsing a basic booking command."""
+        args = self.command._parse_args("book 2024-03-20 18:00 john@usc.nl alice@usc.nl")
+        self.assertIsNotNone(args, "Arguments should be parsed successfully")
+        self.assertFalse(args.dry_run)  # type: ignore
+        self.assertEqual(args.date, "2024-03-20")  # type: ignore
+        self.assertEqual(args.time, "18:00")  # type: ignore
+        self.assertEqual(args.members, ["john@usc.nl", "alice@usc.nl"])  # type: ignore
+
+    def test_dry_run_flag(self):
+        """Test parsing a command with dry-run flag."""
+        args = self.command._parse_args("book --dry-run 2024-03-20 18:00 john@usc.nl")
+        self.assertIsNotNone(args, "Arguments should be parsed successfully")
+        self.assertTrue(args.dry_run)  # type: ignore
+        self.assertEqual(args.date, "2024-03-20")  # type: ignore
+        self.assertEqual(args.time, "18:00")  # type: ignore
+        self.assertEqual(args.members, ["john@usc.nl"])  # type: ignore
+
+    def test_help_request(self):
+        """Test help request returns None."""
+        self.assertIsNone(self.command._parse_args("book --help"))
+        self.assertIsNone(self.command._parse_args("book -h"))
+
+    def test_invalid_command(self):
+        """Test invalid command raises error."""
+        with self.assertRaises(RuntimeError):
+            self.command._parse_args("book")  # Missing required arguments
+
+    def test_quoted_emails(self):
+        """Test handling of quoted email addresses."""
+        args = self.command._parse_args(
+            'book 2024-03-20 18:00 "john@usc.nl" "user with spaces@usc.nl"'
+        )
+        self.assertIsNotNone(args, "Arguments should be parsed successfully")
+        self.assertEqual(args.members, ["john@usc.nl", "user with spaces@usc.nl"])  # type: ignore
+
+
+@patch("usc_signal_bot.commands.parse")
+class TestBookingCommand(unittest.TestCase):
+    """Test cases for the booking command handler."""
+
+    def setUp(self):
+        """Set up test cases."""
+        self.command = BookTimeslotCommand(
+            create_test_creds(["john@usc.nl", "sarah@usc.nl", "mike@usc.nl"])
+        )
+        self.context = MagicMock(spec=Context)
+        self.context.send = AsyncMock()
+
+    async def test_help_message(self, mock_parse):
+        """Test help message is shown."""
+        self.context.message.text = "book --help"
+        await self.command.handle(self.context)
+        self.context.send.assert_called_once()
+        help_text = self.context.send.call_args[0][0]
+        self.assertIn("Book a timeslot at USC", help_text)
+
+    @patch("usc_signal_bot.commands.USCClient")
+    async def test_dry_run_booking(self, mock_usc_client, mock_parse):
+        """Test dry run booking shows what would be booked."""
+        # Setup mocks
+        mock_parse.return_value = "2024-03-20 18:00"
+        mock_client = AsyncMock()
+        mock_usc_client.return_value = mock_client
+        mock_client.get_matching_slot.return_value = MagicMock(
+            startDate="2024-03-20 18:00", endDate="2024-03-20 19:00"
+        )
+        mock_client.get_member.return_value = MagicMock(id=123)
+
+        # Test dry run
+        self.context.message.text = "book --dry-run 2024-03-20 18:00 john@usc.nl alice@usc.nl"
+        await self.command.handle(self.context)
+
+        # Verify
+        self.context.send.assert_called_once()
+        response = self.context.send.call_args[0][0]
+        self.assertIn("[DRY RUN]", response)
+        self.assertIn("Would book slot", response)
+        # Verify no actual booking was made
+        mock_client.book_slot.assert_not_called()
+
+    @patch("usc_signal_bot.commands.USCClient")
+    async def test_actual_booking(self, mock_usc_client, mock_parse):
+        """Test actual booking makes the API call."""
+        # Setup mocks
+        mock_parse.return_value = "2024-03-20 18:00"
+        mock_client = AsyncMock()
+        mock_usc_client.return_value = mock_client
+        mock_client.get_matching_slot.return_value = MagicMock(
+            startDate="2024-03-20 18:00", endDate="2024-03-20 19:00"
+        )
+        mock_client.get_member.return_value = MagicMock(id=123)
+
+        # Test actual booking
+        self.context.message.text = "book 2024-03-20 18:00 john@usc.nl alice@usc.nl"
+        await self.command.handle(self.context)
+
+        # Verify
+        self.context.send.assert_called_once()
+        response = self.context.send.call_args[0][0]
+        self.assertNotIn("[DRY RUN]", response)
+        self.assertIn("Booking successful", response)
+        # Verify booking was made
+        mock_client.book_slot.assert_called_once()
 
 
 if __name__ == "__main__":
