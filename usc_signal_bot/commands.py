@@ -16,7 +16,7 @@ from signalbot import Command, Context, triggered
 
 from usc_signal_bot._version import __version__
 from usc_signal_bot.config import BookingMember, USCCreds
-from usc_signal_bot.usc import AMSTERDAM_TZ, USCClient, format_slot_date
+from usc_signal_bot.usc import AMSTERDAM_TZ, BookableSlot, USCClient, _to_dict_key, format_slot_date
 
 
 def resolve_alias(email_or_alias: str, aliases: dict[str, str]) -> str:
@@ -254,6 +254,7 @@ class BookTimeslotCommand(Command):
         members: List[str],
         booking_member: BookingMember,
         dry_run: bool = False,
+        pre_assigned_slot: Optional[BookableSlot] = None,
     ) -> str:
         """Make a booking with a specific member's credentials.
 
@@ -262,6 +263,7 @@ class BookTimeslotCommand(Command):
             members: List of member emails to invite (max 2)
             booking_member: Credentials to use for booking
             dry_run: If True, only simulate the booking without actually making it
+            pre_assigned_slot: Optional pre-assigned slot to book
 
         Returns:
             str: Booking response message
@@ -269,11 +271,17 @@ class BookTimeslotCommand(Command):
         usc = USCClient()
         try:
             await usc.authenticate(booking_member.username, booking_member.password)
-            slot = await usc.get_matching_slot(date)
-            if not slot:
-                raise RuntimeError(f"No available slot found on {date}")
 
+            # Get member info first as we need it for both cases
             booking_member_info = await usc.get_member()
+
+            if pre_assigned_slot:
+                slot = pre_assigned_slot
+            else:
+                slot = await usc.get_matching_slot(date)
+                if not slot:
+                    raise RuntimeError(f"No available slot found on {date}")
+
             booking_data = usc.create_booking_data(booking_member_info.id, members, slot=slot)
 
             if dry_run:
@@ -371,10 +379,41 @@ class BookTimeslotCommand(Command):
             # Allocate bookings smartly
             allocations = self._allocate_bookings(resolved_members)
 
-            # Make bookings in parallel
+            # First get all slots and assign them to each booking
+            usc = USCClient()
+            try:
+                # Use first member's credentials to get slots
+                first_member = allocations[0][0]
+                await usc.authenticate(first_member.username, first_member.password)
+
+                # Get all available slots for the time
+                slots_response = await usc.get_slots(date)
+                grouped_slots = usc.format_slots(slots_response.data)
+
+                # Get slots for the specific time
+                time_key = _to_dict_key(date)
+                if time_key not in grouped_slots:
+                    raise RuntimeError(f"No slots available for {date}")
+
+                available_slots = grouped_slots[time_key]
+                if len(available_slots) < len(allocations):
+                    raise RuntimeError(
+                        f"Not enough slots available. Need {len(allocations)} slots but only found {len(available_slots)}"
+                    )
+
+                # Assign slots to each booking
+                booking_allocations: List[tuple[BookingMember, List[str], BookableSlot]] = []
+                for i, (booking_member, members_to_book) in enumerate(allocations):
+                    booking_allocations.append(
+                        (booking_member, members_to_book, available_slots[i])
+                    )
+            finally:
+                await usc.close()
+
+            # Make bookings in parallel with pre-assigned slots
             booking_tasks = [
-                self._make_booking(date, members_to_book, booking_member, args.dry_run)
-                for booking_member, members_to_book in allocations
+                self._make_booking(date, members_to_book, booking_member, args.dry_run, slot)
+                for booking_member, members_to_book, slot in booking_allocations
             ]
 
             # Wait for all bookings to complete
