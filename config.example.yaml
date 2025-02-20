@@ -19,11 +19,22 @@ commands:
     contacts:
       - "+1234567890"  # Replace with your number
     groups: true  # Read from all groups
+  - name: aliases
+    contacts:
+      - "+1234567890"  # Replace with your number
+    groups: true  # Read from all groups
 
 usc:
+  # Booking members with their credentials
   bookingMembers:
     - username: "your_username1"
       password: "your_password1"
     - username: "your_username2"
       password: "your_password2"
     # Add more booking members as needed
+
+  # Aliases map friendly names to email addresses
+  aliases:
+    alex: "alex@gmail.com"
+    bob: "bob@example.com"
+    # Add more aliases as needed

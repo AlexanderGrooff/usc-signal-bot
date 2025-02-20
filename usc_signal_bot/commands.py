@@ -19,6 +19,25 @@ from usc_signal_bot.config import BookingMember, USCCreds
 from usc_signal_bot.usc import AMSTERDAM_TZ, USCClient, format_slot_date
 
 
+def resolve_alias(email_or_alias: str, aliases: dict[str, str]) -> str:
+    """Resolve an alias to an email address.
+
+    Args:
+        email_or_alias: Email address or alias to resolve (case insensitive)
+        aliases: Dictionary mapping aliases to email addresses
+
+    Returns:
+        str: Resolved email address
+    """
+    # Convert input to lowercase for case-insensitive matching
+    email_or_alias_lower = email_or_alias.lower()
+
+    # Create case-insensitive alias lookup
+    aliases_lower = {k.lower(): v for k, v in aliases.items()}
+
+    return aliases_lower.get(email_or_alias_lower, email_or_alias)
+
+
 def notify_error(func):
     @wraps(func)
     async def wrapper_notify_error(self, c: Context):
@@ -37,13 +56,11 @@ def ignore_unrelated_messages(start_word, case_sensitive=False):
         async def wrapper_ignore_unrelated_messages(self, c: Context):
             text = c.message.text
             if not isinstance(text, str):
-                logging.debug(f"Ignoring unrelated message: {text}, expected {start_word}")
                 return
 
             if not case_sensitive:
                 text = text.lower()
             if not text.startswith(start_word):
-                logging.info(f"Ignoring unrelated message: {text}, expected {start_word}")
                 return
 
             return await func(self, c)
@@ -61,6 +78,40 @@ def get_version() -> str:
 def get_hostname() -> str:
     """Get the hostname, preferring HOSTNAME env var over socket.gethostname()."""
     return os.getenv("HOSTNAME", "unknown")
+
+
+class AliasesCommand(Command):
+    """Command to display all configured aliases."""
+
+    def __init__(self, usc_creds: USCCreds):
+        super().__init__()
+        self.usc_creds = usc_creds
+
+    def setup(self):
+        logging.info("Setting up AliasesCommand")
+        return super().setup()
+
+    def describe(self) -> str:
+        logging.info("Describing AliasesCommand")
+        return super().describe()
+
+    @ignore_unrelated_messages("aliases")
+    @notify_error
+    async def handle(self, c: Context):
+        """Handle the aliases command."""
+        logging.info("Handling aliases command")
+
+        if not self.usc_creds.aliases:
+            await c.send("No aliases configured.")
+            return
+
+        # Format the aliases nicely
+        alias_lines = [
+            f"- **{alias}** → {email}" for alias, email in sorted(self.usc_creds.aliases.items())
+        ]
+
+        response = "Configured aliases:\n" + "\n".join(alias_lines)
+        await c.send(response, text_mode="styled")
 
 
 class PingCommand(Command):
@@ -185,7 +236,7 @@ class BookTimeslotCommand(Command):
         parser.add_argument(
             "members",
             nargs="+",
-            help="Email addresses of members to book for",
+            help="Email addresses or aliases of members to book for",
         )
         return parser
 
@@ -313,8 +364,11 @@ class BookTimeslotCommand(Command):
             if not date:
                 raise RuntimeError(f"Failed to parse date '{args.date} {args.time}'")
 
+            # Resolve aliases to email addresses
+            resolved_members = [resolve_alias(m, self.usc_creds.aliases) for m in args.members]
+
             # Allocate bookings smartly
-            allocations = self._allocate_bookings(args.members)
+            allocations = self._allocate_bookings(resolved_members)
 
             # Make bookings in parallel
             booking_tasks = [

@@ -1,6 +1,6 @@
 """Configuration classes for the USC Signal Bot."""
 
-from typing import List, Union
+from typing import Dict, List, Union
 
 from pydantic import BaseModel
 
@@ -31,6 +31,7 @@ class USCCreds(BaseModel):
     """Credentials for the USC API."""
 
     bookingMembers: List[BookingMember]
+    aliases: Dict[str, str] = {}
 
 
 class Config(BaseModel):
