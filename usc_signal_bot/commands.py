@@ -322,7 +322,6 @@ class BookTimeslotCommand(Command):
                 if next_player not in players_to_book:
                     current_group.append(next_player)
                     remaining_players.remove(next_player)
-                    # j -= 1
                 else:
                     j += 1
             allocations.append((booking_member, current_group))
@@ -346,7 +345,9 @@ class BookTimeslotCommand(Command):
                 return None
             return self.parser.parse_args(args)
         except (ArgumentError, ValueError, SystemExit) as e:
-            raise RuntimeError(f"Error parsing arguments: {str(e)}") from e
+            raise RuntimeError(
+                f"Error parsing arguments: {str(e)}\n{self.parser.format_help()}"
+            ) from e
 
     @ignore_unrelated_messages("book")
     @notify_error

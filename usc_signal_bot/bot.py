@@ -4,7 +4,12 @@ import os
 import yaml
 from signalbot import SignalBot
 
-from usc_signal_bot.commands import BookTimeslotCommand, GetTimeslotsCommand, PingCommand
+from usc_signal_bot.commands import (
+    AliasesCommand,
+    BookTimeslotCommand,
+    GetTimeslotsCommand,
+    PingCommand,
+)
 from usc_signal_bot.config import Config
 
 
@@ -31,11 +36,18 @@ def main():
     # Register commands with their specific configurations
     for cmd in config.commands:
         logging.info(f"Registering command: {cmd.name}")
-        if cmd.name == "ping":
-            bot.register(PingCommand(), contacts=cmd.contacts, groups=cmd.groups)
-        elif cmd.name == "timeslots":
-            bot.register(GetTimeslotsCommand(config.usc), contacts=cmd.contacts, groups=cmd.groups)
-        elif cmd.name == "book":
-            bot.register(BookTimeslotCommand(config.usc), contacts=cmd.contacts, groups=cmd.groups)
+        match cmd.name:
+            case "ping":
+                bot.register(PingCommand(), contacts=cmd.contacts, groups=cmd.groups)
+            case "timeslots":
+                bot.register(
+                    GetTimeslotsCommand(config.usc), contacts=cmd.contacts, groups=cmd.groups
+                )
+            case "book":
+                bot.register(
+                    BookTimeslotCommand(config.usc), contacts=cmd.contacts, groups=cmd.groups
+                )
+            case "aliases":
+                bot.register(AliasesCommand(config.usc), contacts=cmd.contacts, groups=cmd.groups)
 
     bot.start()
