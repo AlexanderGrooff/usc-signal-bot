@@ -16,7 +16,7 @@ from signalbot import Command, Context, triggered
 
 from usc_signal_bot._version import __version__
 from usc_signal_bot.config import BookingMember, USCCreds
-from usc_signal_bot.usc import AMSTERDAM_TZ, BookableSlot, USCClient, _to_dict_key, format_slot_date
+from usc_signal_bot.usc import AMSTERDAM_TZ, BookableSlot, USCClient, format_slot_date
 
 
 def resolve_alias(email_or_alias: str, aliases: dict[str, str]) -> str:
@@ -369,7 +369,7 @@ class BookTimeslotCommand(Command):
                 await self.log(c, self.parser.format_help())
                 return
 
-            date = parse(f"{args.date} {args.time}")
+            date = parse(f"{args.date} {args.time}", settings={"TIMEZONE": "Europe/Amsterdam"})
             if not date:
                 raise RuntimeError(f"Failed to parse date '{args.date} {args.time}'")
 
@@ -386,20 +386,8 @@ class BookTimeslotCommand(Command):
                 first_member = allocations[0][0]
                 await usc.authenticate(first_member.username, first_member.password)
 
-                # Get all available slots for the time
-                slots_response = await usc.get_slots(date)
-                grouped_slots = usc.format_slots(slots_response.data)
-
-                # Get slots for the specific time
-                time_key = _to_dict_key(date)
-                if time_key not in grouped_slots:
-                    raise RuntimeError(f"No slots available for {date}")
-
-                available_slots = grouped_slots[time_key]
-                if len(available_slots) < len(allocations):
-                    raise RuntimeError(
-                        f"Not enough slots available. Need {len(allocations)} slots but only found {len(available_slots)}"
-                    )
+                # Get the required number of slots
+                available_slots = await usc.get_slots_for_booking(date, len(allocations))
 
                 # Assign slots to each booking
                 booking_allocations: List[tuple[BookingMember, List[str], BookableSlot]] = []

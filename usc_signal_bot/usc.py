@@ -128,14 +128,7 @@ class USCClient:
         if not self.auth:
             raise RuntimeError("Not authenticated")
 
-        if isinstance(date, str):
-            parsed_date = parse(date, settings={"TIMEZONE": "Europe/Amsterdam"})
-            if not parsed_date:
-                raise RuntimeError(f"Failed to parse date '{date}'")
-            date = parsed_date.replace(tzinfo=AMSTERDAM_TZ)
-        elif date.tzinfo is None:
-            # If datetime has no timezone, assume it's Amsterdam time
-            date = date.replace(tzinfo=AMSTERDAM_TZ)
+        date = _parse_ams_date(date)
 
         # Convert to UTC for API request
         utc_date = date.astimezone(UTC_TZ)
@@ -179,6 +172,41 @@ class USCClient:
         # Convert the raw slots to BookableSlot objects
         slots = [BookableSlot(**slot) for slot in data["data"]]
         return BookableSlotsResponse(data=slots, **{k: v for k, v in data.items() if k != "data"})
+
+    async def get_slots_for_booking(
+        self, date: datetime | str, num_slots: int
+    ) -> List[BookableSlot]:
+        """Get the required number of slots for a booking at the specified date.
+
+        Args:
+            date: The date and time to get slots for
+            num_slots: The number of slots needed
+
+        Returns:
+            List of available slots matching the requirements
+
+        Raises:
+            RuntimeError if not enough slots are available
+        """
+        date = _parse_ams_date(date)
+
+        # Get all available slots for the time
+        slots_response = await self.get_slots(date)
+        grouped_slots = self.format_slots(slots_response.data)
+
+        # Get slots for the specific time
+        time_key = _to_dict_key(date)
+        if time_key not in grouped_slots:
+            raise RuntimeError(f"No slots available for {date}")
+
+        available_slots = grouped_slots[time_key]
+        if len(available_slots) < num_slots:
+            raise RuntimeError(
+                f"Not enough slots available. Need {num_slots} slots but only found {len(available_slots)}"
+            )
+
+        # Return exactly the number of slots needed
+        return available_slots[:num_slots]
 
     async def get_member(self) -> Member:
         """Get the current member's information.
@@ -353,3 +381,23 @@ def format_slot_date(date: datetime) -> str:
         str: Formatted date
     """
     return date.strftime("%Y-%m-%d %H:%M")
+
+
+def _parse_ams_date(date: str | datetime) -> datetime:
+    """Parse a date string or datetime object and return an Amsterdam timezone datetime.
+
+    Args:
+        date: Date string or datetime object
+
+    Returns:
+        datetime: Amsterdam timezone datetime
+    """
+    if isinstance(date, str):
+        parsed_date = parse(date, settings={"TIMEZONE": "Europe/Amsterdam"})
+        if not parsed_date:
+            raise RuntimeError(f"Failed to parse date '{date}'")
+        return parsed_date.replace(tzinfo=AMSTERDAM_TZ)
+    elif date.tzinfo is None:
+        return date.replace(tzinfo=AMSTERDAM_TZ)
+    else:
+        return date
