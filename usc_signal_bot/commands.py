@@ -226,6 +226,11 @@ class BookTimeslotCommand(Command):
             help="Simulate booking without actually making the reservation",
         )
         parser.add_argument(
+            "courts",
+            type=int,
+            help="Number of courts to book",
+        )
+        parser.add_argument(
             "date",
             help="Date to book (YYYY-MM-DD)",
         )
@@ -294,7 +299,9 @@ class BookTimeslotCommand(Command):
         finally:
             await usc.close()
 
-    def _allocate_bookings(self, players: List[str]) -> List[tuple[BookingMember, List[str]]]:
+    def _allocate_bookings(
+        self, players: List[str], courts: int
+    ) -> List[tuple[BookingMember, List[str]]]:
         """Allocate booking members to groups of players.
 
         This function tries to match booking members with their emails when possible,
@@ -303,29 +310,42 @@ class BookTimeslotCommand(Command):
 
         Args:
             players: List of player emails to book for
+            courts: Number of courts user wants us to book
 
         Returns:
             List of tuples containing (booking_member, list_of_members_to_book_for)
         """
+        amount_of_players = len(players)
         authenticated_players = [m for m in self.usc_creds.bookingMembers if m.username in players]
         allocations: List[tuple[BookingMember, List[str]]] = []
         remaining_players = players.copy()
-        amount_of_bookings_required = math.ceil(len(players) / 3)  # 1 slot per 3 players
-        amount_of_authenticated_players = len(authenticated_players)
-        players_to_book = [m.username for m in authenticated_players][:amount_of_bookings_required]
+        amount_of_bookings_required = math.ceil(
+            amount_of_players / 4
+        )  # 1 slot per maximum 4 players
 
-        if amount_of_authenticated_players < amount_of_bookings_required:
+        # Check if the user is a pannenkoek and wants too little courts
+        if courts < amount_of_bookings_required:
             raise RuntimeError(
-                f"Not enough booking members available to book {amount_of_bookings_required} squash courts"
+                f"Requested {courts} courts, but at least {amount_of_bookings_required} are needed for {amount_of_players} players"
             )
 
-        # Allocate authenticated players to groups of 2 players
-        for i in range(amount_of_bookings_required):
+        amount_of_bookings_to_make = max(amount_of_bookings_required, courts)
+        amount_of_authenticated_players = len(authenticated_players)
+        players_to_book = [m.username for m in authenticated_players][:amount_of_bookings_to_make]
+
+        if amount_of_authenticated_players < amount_of_bookings_to_make:
+            raise RuntimeError(
+                f"Not enough authenticated booking members available to book {amount_of_bookings_to_make} squash courts"
+            )
+
+        players_per_court = math.ceil(amount_of_players / courts)  # Calculate players per court
+        for i in range(amount_of_bookings_to_make):
             booking_member = authenticated_players[i]
             current_group = []
             remaining_players.remove(booking_member.username)
             j = 0
-            while len(remaining_players) > 0 and len(current_group) < 2:
+            # For the players_per_court we remove the booking member from the amount of players to book
+            while len(remaining_players) > 0 and len(current_group) < players_per_court - 1:
                 next_player = remaining_players[j]
                 if next_player not in players_to_book:
                     current_group.append(next_player)
@@ -376,8 +396,12 @@ class BookTimeslotCommand(Command):
             # Resolve aliases to email addresses
             resolved_members = [resolve_alias(m, self.usc_creds.aliases) for m in args.members]
 
+            # Validate the number of courts for the amount of members
+            if args.courts > len(resolved_members):
+                raise ValueError("Cannot book more courts than members")
+
             # Allocate bookings smartly
-            allocations = self._allocate_bookings(resolved_members)
+            allocations = self._allocate_bookings(resolved_members, args.courts)
 
             # First get all slots and assign them to each booking
             usc = USCClient()
