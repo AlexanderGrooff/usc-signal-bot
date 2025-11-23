@@ -3,17 +3,94 @@
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from functools import wraps
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 from zoneinfo import ZoneInfo
 
 import httpx
 from dateparser import parse
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, ValidationError, field_serializer
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+
+T = TypeVar("T")
 
 # All chat-input dates are in Amsterdam timezone.
 # All dates in the USC API are in UTC.
 AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
 UTC_TZ = ZoneInfo("UTC")
+
+
+def _is_retryable_error(exception: Exception) -> bool:
+    """Check if an exception is retryable.
+
+    Args:
+        exception: The exception to check
+
+    Returns:
+        bool: True if the exception is retryable, False otherwise
+    """
+    # Retry on network errors and timeouts
+    if isinstance(exception, (httpx.NetworkError, httpx.TimeoutException)):
+        return True
+
+    # Retry on any HTTP status code >= 400
+    if isinstance(exception, httpx.HTTPStatusError):
+        status_code = exception.response.status_code
+        return status_code >= 400
+
+    # Retry on Pydantic ValidationError (invalid API response data)
+    if isinstance(exception, ValidationError):
+        return True
+
+    # Check if RuntimeError wraps an HTTPStatusError or ValidationError (from our error handling)
+    if isinstance(exception, RuntimeError) and exception.__cause__ is not None:
+        if isinstance(exception.__cause__, httpx.HTTPStatusError):
+            status_code = exception.__cause__.response.status_code
+            return status_code >= 400
+        if isinstance(exception.__cause__, ValidationError):
+            return True
+
+    return False
+
+
+def retry_api_call(func: Callable[..., T]) -> Callable[..., T]:
+    """Decorator to retry API calls with exponential backoff.
+
+    Retries on network errors, timeouts, and HTTP status codes >= 400.
+    Uses exponential backoff: 1s, 2s, 4s, 8s.
+    Maximum 4 retry attempts.
+
+    Args:
+        func: The async function to wrap
+
+    Returns:
+        Wrapped function with retry logic
+    """
+
+    def _log_retry(retry_state: Any) -> None:
+        """Log retry attempt."""
+        exception = retry_state.outcome.exception() if retry_state.outcome.failed else None
+        if exception:
+            logging.warning(
+                f"Retrying {func.__name__} (attempt {retry_state.attempt_number}) "
+                f"after {type(exception).__name__}: {exception}"
+            )
+        else:
+            logging.warning(f"Retrying {func.__name__} (attempt {retry_state.attempt_number})")
+
+    retry_decorator = retry(
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception(_is_retryable_error),
+        reraise=True,
+        before_sleep=_log_retry,
+    )
+
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> T:
+        return await retry_decorator(func)(*args, **kwargs)
+
+    return wrapper
 
 
 class Auth(BaseModel):
@@ -93,9 +170,12 @@ class USCClient:
 
     def __init__(self) -> None:
         """Initialize the USC client."""
-        self.client = httpx.AsyncClient(base_url=self.BASE_URL)
+        timeout = httpx.Timeout(10.0, connect=10.0, read=30.0)
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        self.client = httpx.AsyncClient(base_url=self.BASE_URL, timeout=timeout, limits=limits)
         self.auth: Optional[Auth] = None
 
+    @retry_api_call
     async def authenticate(self, username: str, password: str) -> Auth:
         """Authenticate with USC.
 
@@ -111,11 +191,19 @@ class USCClient:
             json={"email": username, "password": password},
             headers={"Content-Type": "application/json"},
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logging.error(f"Error authenticating with USC: {e}")
+            logging.error(f"Response: {response.text}")
+            raise RuntimeError(
+                f"Error authenticating with USC: {e}; response: {response.text}"
+            ) from e
         self.auth = Auth(**response.json())
         logging.info(f"Authenticated with USC: {self.auth}")
         return self.auth
 
+    @retry_api_call
     async def get_slots(self, date: str | datetime) -> BookableSlotsResponse:
         """Get available slots for a date.
 
@@ -170,7 +258,14 @@ class USCClient:
         data = response.json()
 
         # Convert the raw slots to BookableSlot objects
-        slots = [BookableSlot(**slot) for slot in data["data"]]
+        try:
+            slots = [BookableSlot(**slot) for slot in data["data"]]
+        except ValidationError as e:
+            logging.error(f"Validation error parsing slots: {e}")
+            logging.error(f"Response data: {data}")
+            raise RuntimeError(
+                f"Invalid slot data received from API (validation error): {e}; response: {data}"
+            ) from e
         return BookableSlotsResponse(data=slots, **{k: v for k, v in data.items() if k != "data"})
 
     async def get_slots_for_booking(
@@ -208,6 +303,7 @@ class USCClient:
         # Return exactly the number of slots needed
         return available_slots[:num_slots]
 
+    @retry_api_call
     async def get_member(self) -> Member:
         """Get the current member's information.
 
@@ -263,6 +359,7 @@ class USCClient:
             ),
         )
 
+    @retry_api_call
     async def book_slot(self, booking_data: BookingData) -> Dict[str, Any]:
         """Book a slot.
 

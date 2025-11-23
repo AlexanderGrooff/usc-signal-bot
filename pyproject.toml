@@ -1,11 +1,10 @@
 [build-system]
-requires = ["setuptools>=45", "setuptools_scm>=6.4"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
-[tool.setuptools_scm]
-version_scheme = "post-release"
-local_scheme = "node-and-date"
-write_to = "usc_signal_bot/_version.py"
+[tool.hatch.version]
+source = "vcs"
+path = "usc_signal_bot/_version.py"
 
 [project]
 name = "usc-signal-bot"
@@ -20,6 +19,7 @@ dependencies = [
     "beautifulsoup4>=4.12.0",  # For parsing USC's website
     "pydantic>=2.10.6",  # For config validation
     "dateparser==1.2.1",  # For natural language date parsing
+    "tenacity>=8.2.0",  # For retry logic with exponential backoff
 ]
 
 [project.optional-dependencies]

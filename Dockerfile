@@ -1,32 +1,50 @@
-FROM python:3.12-slim
+# Build stage - contains build tools and installs dependencies
+FROM python:3.12-slim AS builder
 
-# Install system dependencies for Signal and curl for healthcheck
-RUN apt-get update && apt-get install -y \
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libssl-dev \
-    curl \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd -m -u 1000 signalbot
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Set working directory and create necessary directories
+# Set working directory
 WORKDIR /app
-RUN mkdir -p /app && chown -R signalbot:signalbot /app
 
-# Copy git data first to optimize layer caching
+# Copy git data for version generation (only in build stage)
 COPY .git/ /app/.git/
 
-# Copy project files
-COPY pyproject.toml README.md main.py /app/
+# Copy project files needed for installation
+COPY pyproject.toml README.md /app/
 COPY usc_signal_bot/ /app/usc_signal_bot/
 
-# Install dependencies and project
-RUN pip install --no-cache-dir .
+# Install dependencies and project using uv (this will generate _version.py with git)
+RUN uv pip install --system --no-cache . && \
+    rm -rf /app/.git
 
-# Clean up git data after install
-RUN rm -rf .git/
+# Runtime stage - minimal image with only runtime dependencies
+FROM python:3.12-slim
+
+# Install only runtime system dependencies and create user in one layer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -u 1000 signalbot
+
+# Set working directory
+WORKDIR /app
+
+# Copy installed Python packages from builder stage
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy application code and generated version file, then set ownership
+COPY --chown=signalbot:signalbot main.py /app/
+COPY --chown=signalbot:signalbot usc_signal_bot/ /app/usc_signal_bot/
+COPY --chown=signalbot:signalbot --from=builder /app/usc_signal_bot/_version.py /app/usc_signal_bot/_version.py
 
 # Switch to non-root user
 USER signalbot

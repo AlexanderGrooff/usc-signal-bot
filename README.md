@@ -18,5 +18,35 @@ When you're done, put the `signal-api` service in `MODE=json-rpc` and restart it
 ### Prerequisites
 
 - Python 3.12
+- [uv](https://github.com/astral-sh/uv) (Python package manager)
 - Docker and Docker Compose
 - direnv
+
+### Setup
+
+1. Install uv (if not already installed):
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+2. Install dependencies:
+   ```bash
+   uv sync
+   ```
+
+3. Activate the virtual environment:
+   ```bash
+   source .venv/bin/activate  # On Linux/macOS
+   # or
+   .venv\Scripts\activate  # On Windows
+   ```
+
+4. Install the project in editable mode:
+   ```bash
+   uv pip install -e .
+   ```
+
+For development with dev dependencies:
+```bash
+uv sync --extra dev
+```
