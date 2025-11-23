@@ -13,13 +13,13 @@ description = "Signal messenger bot for USC gym reservations"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "signalbot>=0.10.1",  # Signal messenger bot framework
-    "pyyaml>=6.0.1",     # For config file parsing
-    "httpx>=0.25.0",     # For making HTTP requests to USC's system
-    "beautifulsoup4>=4.12.0",  # For parsing USC's website
-    "pydantic>=2.10.6",  # For config validation
-    "dateparser==1.2.1",  # For natural language date parsing
-    "tenacity>=8.2.0",  # For retry logic with exponential backoff
+    "signalbot>=0.20.0", # Signal messenger bot framework
+    "pyyaml>=6.0.1", # For config file parsing
+    "httpx>=0.25.0", # For making HTTP requests to USC's system
+    "beautifulsoup4>=4.12.0", # For parsing USC's website
+    "pydantic>=2.10.6", # For config validation
+    "dateparser==1.2.1", # For natural language date parsing
+    "tenacity>=8.2.0", # For retry logic with exponential backoff
 ]
 
 [project.optional-dependencies]
