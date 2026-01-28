@@ -165,7 +165,7 @@ class USCClient:
     """USC API client."""
 
     BASE_URL = "https://backbone-web-api.production.uva.delcom.nl"
-    FROM_TIME = "17:30:00.000"
+    FROM_TIME = "10:00:00.000"
     UNTIL_TIME = "19:00:00.000"
 
     def __init__(self) -> None:
