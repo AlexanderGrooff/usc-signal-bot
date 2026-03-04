@@ -293,3 +293,96 @@ class TestUSCRetryBehavior:
         assert call_count == 3, f"Should retry twice then succeed, but got {call_count} calls"
         assert len(result.data) == 1
         assert result.data[0].linkedProductId == 456
+
+    async def test_validation_error_contains_structured_slot_details(self, client):
+        """Test that invalid slot errors include compact debugging details."""
+        call_count = 0
+
+        async def mock_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            response = MagicMock()
+            response.status_code = 200
+            response.raise_for_status.return_value = None
+            response.json.return_value = {
+                "data": [
+                    {
+                        "startDate": "2024-03-20T17:30:00.000Z",
+                        "endDate": "2024-03-20T19:00:00.000Z",
+                        "isAvailable": True,
+                        "linkedProductId": None,
+                        "bookableProductId": 123,
+                        "linkedProduct": {
+                            "id": 999,
+                            "description": "Unexpected payload shape from USC",
+                        },
+                    }
+                ],
+                "page": 1,
+                "count": 1,
+                "total": 1,
+                "pageCount": 1,
+            }
+            return response
+
+        client.client.get = AsyncMock(side_effect=mock_get)
+        client.auth = MagicMock()
+        client.auth.token_type = "Bearer"
+        client.auth.access_token = "token"
+
+        date = datetime.now(AMSTERDAM_TZ)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await client.get_slots(date)
+
+        message = str(exc_info.value)
+        assert (
+            call_count == 4
+        ), f"Should attempt 4 times before giving up, but got {call_count} calls"
+        assert "Invalid slot data received from API" in message
+        assert "linkedProductId" in message
+        assert "value=None" in message
+        assert "all 1 slot(s) were invalid" in message
+        assert "response_summary=count=1, total=1, page=1, pageCount=1, slot_count=1" in message
+        assert "slot_index=0:" in message
+        assert "slot_preview={'startDate': '2024-03-20T17:30:00.000Z'" in message
+
+    async def test_mixed_valid_and_invalid_slots_returns_valid_ones(self, client):
+        """Test that invalid slots are skipped when the response still contains valid slots."""
+        response = MagicMock()
+        response.status_code = 200
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data": [
+                {
+                    "startDate": "2024-03-20T17:30:00.000Z",
+                    "endDate": "2024-03-20T18:14:00.000Z",
+                    "isAvailable": True,
+                    "linkedProductId": None,
+                    "bookableProductId": 123,
+                },
+                {
+                    "startDate": "2024-03-20T17:30:00.000Z",
+                    "endDate": "2024-03-20T18:14:00.000Z",
+                    "isAvailable": True,
+                    "linkedProductId": 456,
+                    "bookableProductId": 124,
+                },
+            ],
+            "page": 1,
+            "count": 2,
+            "total": 2,
+            "pageCount": 1,
+        }
+
+        client.client.get = AsyncMock(return_value=response)
+        client.auth = MagicMock()
+        client.auth.token_type = "Bearer"
+        client.auth.access_token = "token"
+
+        date = datetime.now(AMSTERDAM_TZ)
+        result = await client.get_slots(date)
+
+        assert len(result.data) == 1
+        assert result.data[0].linkedProductId == 456
+        assert result.count == 2

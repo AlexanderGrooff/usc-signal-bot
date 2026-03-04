@@ -20,6 +20,38 @@ AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
 UTC_TZ = ZoneInfo("UTC")
 
 
+def _format_validation_location(location: tuple[Any, ...]) -> str:
+    """Format a Pydantic error location for logs and user-visible errors."""
+    return ".".join(str(part) for part in location) if location else "<root>"
+
+
+def _format_slot_validation_error(error: ValidationError, slot: Any, index: int) -> str:
+    """Build a concise error message for a single invalid slot payload."""
+    error_details = error.errors(include_url=False)
+    detail_parts: list[str] = []
+
+    for err in error_details:
+        field = _format_validation_location(err.get("loc", ()))
+        value = repr(err.get("input"))
+        detail_parts.append(f"{field}: {err.get('msg')} (value={value})")
+
+    slot_preview = (
+        {
+            "startDate": slot.get("startDate"),
+            "endDate": slot.get("endDate"),
+            "bookableProductId": slot.get("bookableProductId"),
+            "linkedProductId": slot.get("linkedProductId"),
+            "isAvailable": slot.get("isAvailable"),
+        }
+        if isinstance(slot, dict)
+        else slot
+    )
+
+    return (
+        f"slot_index={index}: errors=[{'; '.join(detail_parts)}]; " f"slot_preview={slot_preview}"
+    )
+
+
 def _is_retryable_error(exception: Exception) -> bool:
     """Check if an exception is retryable.
 
@@ -257,15 +289,40 @@ class USCClient:
             raise RuntimeError(f"Error getting slots: {e}; response: {response.text}") from e
         data = response.json()
 
-        # Convert the raw slots to BookableSlot objects
-        try:
-            slots = [BookableSlot(**slot) for slot in data["data"]]
-        except ValidationError as e:
-            logging.error(f"Validation error parsing slots: {e}")
-            logging.error(f"Response data: {data}")
-            raise RuntimeError(
-                f"Invalid slot data received from API (validation error): {e}; response: {data}"
-            ) from e
+        raw_slots = data.get("data", [])
+        slots: list[BookableSlot] = []
+        invalid_slot_errors: list[str] = []
+        first_validation_error: ValidationError | None = None
+
+        for index, slot in enumerate(raw_slots):
+            try:
+                slots.append(BookableSlot(**slot))
+            except ValidationError as e:
+                if first_validation_error is None:
+                    first_validation_error = e
+                invalid_slot_errors.append(_format_slot_validation_error(e, slot, index))
+
+        if invalid_slot_errors:
+            summary = (
+                f"Skipped {len(invalid_slot_errors)} invalid slot(s) from USC response; "
+                f"returning {len(slots)} valid slot(s). Examples: "
+                + " | ".join(invalid_slot_errors[:3])
+            )
+            logging.warning(summary)
+            logging.debug("Full slot validation issues: %s", invalid_slot_errors)
+            logging.debug("Full invalid slot response: %s", data)
+
+        if not slots and invalid_slot_errors:
+            response_summary = (
+                "Invalid slot data received from API: "
+                f"all {len(invalid_slot_errors)} slot(s) were invalid; "
+                f"response_summary=count={data.get('count')}, total={data.get('total')}, "
+                f"page={data.get('page')}, pageCount={data.get('pageCount')}, "
+                f"slot_count={len(raw_slots)}; "
+                f"examples={' | '.join(invalid_slot_errors[:3])}"
+            )
+            raise RuntimeError(response_summary) from first_validation_error
+
         return BookableSlotsResponse(data=slots, **{k: v for k, v in data.items() if k != "data"})
 
     async def get_slots_for_booking(
