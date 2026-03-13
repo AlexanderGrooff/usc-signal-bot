@@ -1229,7 +1229,7 @@ wheels = [
 
 [[package]]
 name = "signalbot"
-version = "0.20.0"
+version = "0.25.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -1237,11 +1237,12 @@ dependencies = [
     { name = "packaging" },
     { name = "phonenumbers" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b8/d4/6fe610242da93fda888ee58a00503e7c73568d8f6164f3e16454e7151675/signalbot-0.20.0.tar.gz", hash = "sha256:5825841fc7f160b1e6549db6cd396efef814e8d453a8a12626184ea50ba7790d", size = 21133 }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/46/deb73ab1391f4bf5cfe1a8ec30bf2ad27b40ad81a8ad4a2c9da5ae75e605/signalbot-0.25.0.tar.gz", hash = "sha256:8c77e4ffda975196109778ca50fc98c1204e148983db4bc67598e7b264371d59", size = 18662 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/4f/b64c06b3aa26f5bf91b7d25f4620e374c8f02e1d3d7d18ab86ad707bc370/signalbot-0.20.0-py3-none-any.whl", hash = "sha256:2f25107fd9322c72923e96487fa0e0d4216acbc39852e2d06ee7342e3dc979c7", size = 21495 },
+    { url = "https://files.pythonhosted.org/packages/ab/6d/99b181c17e95140411718873bd7c94cc556dbc9d31b44491d4bdfee460ae/signalbot-0.25.0-py3-none-any.whl", hash = "sha256:4a3687a41e2fb815d41903e271b8c01c0f66dc81bed654e293d1d5c7c388b4d1", size = 23368 },
 ]
 
 [[package]]
@@ -1356,7 +1357,7 @@ wheels = [
 
 [[package]]
 name = "usc-signal-bot"
-version = "0.5.1.dev0+g8d2cfa991.d20251123"
+version = "1.0.1.dev0+g0a2437c22.d20260313"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -1396,7 +1397,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "pyyaml", specifier = ">=6.0.1" },
-    { name = "signalbot", specifier = ">=0.20.0" },
+    { name = "signalbot", specifier = ">=0.25.0" },
     { name = "tenacity", specifier = ">=8.2.0" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.12" },
 ]
