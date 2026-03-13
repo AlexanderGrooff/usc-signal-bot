@@ -38,3 +38,10 @@ usc:
     alex: "alex@gmail.com"
     bob: "bob@example.com"
     # Add more aliases as needed
+
+  # USC activity product ids used to look up bookable slots
+  activityProductIds:
+    - 4637
+
+  # Optional USC role id header required by the current web client
+  userRoleId: 34774

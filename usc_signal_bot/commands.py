@@ -177,7 +177,7 @@ class GetTimeslotsCommand(Command):
 
         # Use the first booking member's credentials
         booking_member = self.usc_creds.bookingMembers[0]
-        usc = USCClient()
+        usc = USCClient(self.usc_creds)
         await usc.authenticate(booking_member.username, booking_member.password)
         timeslots = await usc.get_slots(date)
 
@@ -273,7 +273,7 @@ class BookTimeslotCommand(Command):
         Returns:
             str: Booking response message
         """
-        usc = USCClient()
+        usc = USCClient(self.usc_creds)
         try:
             await usc.authenticate(booking_member.username, booking_member.password)
 
@@ -404,7 +404,7 @@ class BookTimeslotCommand(Command):
             allocations = self._allocate_bookings(resolved_members, args.courts)
 
             # First get all slots and assign them to each booking
-            usc = USCClient()
+            usc = USCClient(self.usc_creds)
             try:
                 # Use first member's credentials to get slots
                 first_member = allocations[0][0]

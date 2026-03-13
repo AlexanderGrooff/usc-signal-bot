@@ -2,7 +2,7 @@
 
 from typing import Dict, List, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SignalConfig(BaseModel):
@@ -31,7 +31,9 @@ class USCCreds(BaseModel):
     """Credentials for the USC API."""
 
     bookingMembers: List[BookingMember]
-    aliases: Dict[str, str] = {}
+    aliases: Dict[str, str] = Field(default_factory=dict)
+    activityProductIds: List[int] = Field(default_factory=list)
+    userRoleId: int | None = None
 
 
 class Config(BaseModel):

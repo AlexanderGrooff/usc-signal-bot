@@ -12,6 +12,8 @@ from dateparser import parse
 from pydantic import BaseModel, ValidationError, field_serializer
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from usc_signal_bot.config import USCCreds
+
 T = TypeVar("T")
 
 # All chat-input dates are in Amsterdam timezone.
@@ -200,12 +202,29 @@ class USCClient:
     FROM_TIME = "10:00:00.000"
     UNTIL_TIME = "19:00:00.000"
 
-    def __init__(self) -> None:
+    def __init__(self, config: Optional[USCCreds] = None) -> None:
         """Initialize the USC client."""
         timeout = httpx.Timeout(10.0, connect=10.0, read=30.0)
         limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
         self.client = httpx.AsyncClient(base_url=self.BASE_URL, timeout=timeout, limits=limits)
         self.auth: Optional[Auth] = None
+        self.config = config or USCCreds(bookingMembers=[])
+
+    def _auth_headers(self, include_content_type: bool = True) -> Dict[str, str]:
+        """Build the standard authenticated request headers for USC."""
+        if not self.auth:
+            raise RuntimeError("Not authenticated")
+
+        headers = {
+            "Authorization": f"{self.auth.token_type} {self.auth.access_token}",
+            "x-platform": "CF",
+            "x-custom-lang": "en",
+        }
+        if include_content_type:
+            headers["Content-Type"] = "application/json"
+        if self.config.userRoleId is not None:
+            headers["x-user-role-id"] = str(self.config.userRoleId)
+        return headers
 
     @retry_api_call
     async def authenticate(self, username: str, password: str) -> Auth:
@@ -245,41 +264,38 @@ class USCClient:
         Returns:
             BookableSlotsResponse: Available slots
         """
-        if not self.auth:
-            raise RuntimeError("Not authenticated")
-
         date = _parse_ams_date(date)
 
-        # Convert to UTC for API request
-        utc_date = date.astimezone(UTC_TZ)
-        date_str = utc_date.strftime("%Y-%m-%d")
+        if not self.config.activityProductIds:
+            raise RuntimeError("No USC activity product ids configured")
+
+        start_of_day = date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = date.replace(hour=23, minute=59, second=59, microsecond=999000)
 
         logging.info(
-            f"Getting slots from {date_str}T{self.FROM_TIME}Z to {date_str}T{self.UNTIL_TIME}Z"
+            "Getting slots from %s to %s for activity product ids %s",
+            start_of_day.astimezone(UTC_TZ).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            end_of_day.astimezone(UTC_TZ).strftime("%Y-%m-%dT%H:%M:%S.999Z"),
+            self.config.activityProductIds,
         )
         params = {
             "s": json.dumps(
                 {
-                    "startDate": f"{date_str}T{self.FROM_TIME}Z",
-                    "endDate": f"{date_str}T{self.UNTIL_TIME}Z",
-                    "tagIds": {"$in": [195]},
+                    "activityProductIds": {"$in": self.config.activityProductIds},
+                    "startDate": {
+                        "$gte": start_of_day.astimezone(UTC_TZ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                    },
+                    "endDate": {
+                        "$lte": end_of_day.astimezone(UTC_TZ).strftime("%Y-%m-%dT%H:%M:%S.999Z")
+                    },
                 }
-            ),
-            "join": json.dumps(
-                [
-                    "linkedProduct",
-                    "product",
-                ]
             ),
         }
 
         response = await self.client.get(
-            "/bookable-slots",
+            "/products/bookable-slots",
             params=params,
-            headers={
-                "Authorization": f"{self.auth.token_type} {self.auth.access_token}",
-                "Content-Type": "application/json",
-            },
+            headers=self._auth_headers(),
         )
         try:
             response.raise_for_status()
@@ -367,16 +383,10 @@ class USCClient:
         Returns:
             Member: Member information
         """
-        if not self.auth:
-            raise RuntimeError("Not authenticated")
-
         response = await self.client.get(
             "/auth",
             params={"cf": 0},
-            headers={
-                "Authorization": f"{self.auth.token_type} {self.auth.access_token}",
-                "Content-Type": "application/json",
-            },
+            headers=self._auth_headers(),
         )
         try:
             response.raise_for_status()
@@ -426,25 +436,25 @@ class USCClient:
         Returns:
             Dict[str, Any]: Booking response
         """
-        if not self.auth:
-            raise RuntimeError("Not authenticated")
-
         response = await self.client.post(
             "/participations",
-            # json=booking_data.model_dump_json(),
             data=booking_data.model_dump_json(),  # type: ignore
-            headers={
-                "Authorization": f"{self.auth.token_type} {self.auth.access_token}",
-                "Content-Type": "application/json",
-            },
+            headers=self._auth_headers(),
         )
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             logging.error(f"Error booking slot: {e}")
             logging.error(f"Response: {response.text}")
+            message = response.text
+            try:
+                payload = response.json()
+                if isinstance(payload, dict):
+                    message = payload.get("message") or payload.get("error") or response.text
+            except Exception:
+                pass
             raise RuntimeError(
-                f"Error booking slot: {e}; response: {response.text}; booking data: {booking_data.model_dump_json()}"
+                f"Error booking slot: {message}; booking data: {booking_data.model_dump_json()}"
             ) from e
         return response.json()
 

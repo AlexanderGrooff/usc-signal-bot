@@ -1,0 +1,5 @@
+{
+    "message": "Sorry, unable to book activity, no member found for email test@testing.nl",
+    "error": "Forbidden",
+    "statusCode": 403
+}

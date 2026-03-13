@@ -1,12 +1,17 @@
 """Test cases for USC API client retry behavior."""
 
+import json
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 
+from usc_signal_bot.config import USCCreds
 from usc_signal_bot.usc import AMSTERDAM_TZ, USCClient
+
+FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 
 
 @pytest.mark.asyncio
@@ -16,11 +21,12 @@ class TestUSCRetryBehavior:
     @pytest.fixture
     def client(self):
         """Create a USC client instance."""
-        return USCClient()
+        return USCClient(
+            USCCreds(bookingMembers=[], activityProductIds=[4637, 4638], userRoleId=34774)
+        )
 
     async def test_retry_on_400_error(self, client):
         """Test that API calls retry on 400 Bad Request."""
-        # Mock the httpx client to raise 400 error twice, then succeed
         call_count = 0
 
         async def mock_post(*args, **kwargs):
@@ -28,10 +34,8 @@ class TestUSCRetryBehavior:
             call_count += 1
             response = MagicMock()
             if call_count < 3:
-                # First two calls fail with 400
                 response.status_code = 400
                 response.text = "Bad Request"
-                # Create a proper HTTPStatusError with a response
                 request = MagicMock()
                 request.url = "https://example.com/auth"
                 error_response = MagicMock()
@@ -43,7 +47,6 @@ class TestUSCRetryBehavior:
                 )
                 response.raise_for_status.side_effect = error
             else:
-                # Third call succeeds
                 response.status_code = 200
                 response.json.return_value = {
                     "access_token": "token",
@@ -58,7 +61,6 @@ class TestUSCRetryBehavior:
 
         client.client.post = AsyncMock(side_effect=mock_post)
 
-        # Should succeed after retries
         result = await client.authenticate("test@usc.nl", "password")
         assert result is not None
         assert call_count == 3, f"Should retry twice then succeed, but got {call_count} calls"
@@ -72,7 +74,6 @@ class TestUSCRetryBehavior:
             call_count += 1
             response = MagicMock()
             if call_count < 2:
-                # First call fails with 429
                 response.status_code = 429
                 response.text = "Too Many Requests"
                 request = MagicMock()
@@ -86,18 +87,14 @@ class TestUSCRetryBehavior:
                 )
                 response.raise_for_status.side_effect = error
             else:
-                # Second call succeeds
                 response.status_code = 200
                 response.json.return_value = {"id": 123, "email": "test@usc.nl"}
                 response.raise_for_status.return_value = None
             return response
 
         client.client.get = AsyncMock(side_effect=mock_get)
-        client.auth = MagicMock()
-        client.auth.token_type = "Bearer"
-        client.auth.access_token = "token"
+        client.auth = MagicMock(token_type="Bearer", access_token="token")
 
-        # Should succeed after retry
         result = await client.get_member()
         assert result is not None
         assert call_count == 2, f"Should retry once then succeed, but got {call_count} calls"
@@ -111,11 +108,10 @@ class TestUSCRetryBehavior:
             call_count += 1
             response = MagicMock()
             if call_count < 3:
-                # First two calls fail with 500
                 response.status_code = 500
                 response.text = "Internal Server Error"
                 request = MagicMock()
-                request.url = "https://example.com/bookable-slots"
+                request.url = "https://example.com/products/bookable-slots"
                 error_response = MagicMock()
                 error_response.status_code = 500
                 error_response.text = "Internal Server Error"
@@ -125,7 +121,6 @@ class TestUSCRetryBehavior:
                 )
                 response.raise_for_status.side_effect = error
             else:
-                # Third call succeeds
                 response.status_code = 200
                 response.json.return_value = {
                     "data": [],
@@ -138,11 +133,8 @@ class TestUSCRetryBehavior:
             return response
 
         client.client.get = AsyncMock(side_effect=mock_get)
-        client.auth = MagicMock()
-        client.auth.token_type = "Bearer"
-        client.auth.access_token = "token"
+        client.auth = MagicMock(token_type="Bearer", access_token="token")
 
-        # Should succeed after retries
         date = datetime.now(AMSTERDAM_TZ)
         result = await client.get_slots(date)
         assert result is not None
@@ -169,7 +161,6 @@ class TestUSCRetryBehavior:
 
         client.client.post = AsyncMock(side_effect=mock_post)
 
-        # Should succeed without retries
         result = await client.authenticate("test@usc.nl", "password")
         assert result is not None
         assert call_count == 1, "Should not retry on success"
@@ -181,7 +172,6 @@ class TestUSCRetryBehavior:
         async def mock_post(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            # Always fail with 400
             response = MagicMock()
             response.status_code = 400
             response.text = "Bad Request"
@@ -197,7 +187,6 @@ class TestUSCRetryBehavior:
 
         client.client.post = AsyncMock(side_effect=mock_post)
 
-        # Should fail after max retries (4 attempts total)
         with pytest.raises(RuntimeError):
             await client.authenticate("test@usc.nl", "password")
         assert (
@@ -212,25 +201,22 @@ class TestUSCRetryBehavior:
             nonlocal call_count
             call_count += 1
             if call_count < 2:
-                # First call fails with network error
                 raise httpx.NetworkError("Connection failed")
-            else:
-                # Second call succeeds
-                response = MagicMock()
-                response.status_code = 200
-                response.json.return_value = {
-                    "access_token": "token",
-                    "token_type": "Bearer",
-                    "refresh_token": "refresh",
-                    "scope": "scope",
-                    "id_token": "id",
-                    "expires_in": "3600",
-                }
-                return response
+
+            response = MagicMock()
+            response.status_code = 200
+            response.json.return_value = {
+                "access_token": "token",
+                "token_type": "Bearer",
+                "refresh_token": "refresh",
+                "scope": "scope",
+                "id_token": "id",
+                "expires_in": "3600",
+            }
+            return response
 
         client.client.post = AsyncMock(side_effect=mock_post)
 
-        # Should succeed after retry
         result = await client.authenticate("test@usc.nl", "password")
         assert result is not None
         assert call_count == 2, "Should retry once then succeed"
@@ -246,14 +232,13 @@ class TestUSCRetryBehavior:
             response.status_code = 200
             response.raise_for_status.return_value = None
             if call_count < 3:
-                # First two calls return invalid data (linkedProductId is None)
                 response.json.return_value = {
                     "data": [
                         {
                             "startDate": "2024-03-20T17:30:00.000Z",
                             "endDate": "2024-03-20T19:00:00.000Z",
                             "isAvailable": True,
-                            "linkedProductId": None,  # Invalid - should be int
+                            "linkedProductId": None,
                             "bookableProductId": 123,
                         }
                     ],
@@ -263,14 +248,13 @@ class TestUSCRetryBehavior:
                     "pageCount": 1,
                 }
             else:
-                # Third call returns valid data
                 response.json.return_value = {
                     "data": [
                         {
                             "startDate": "2024-03-20T17:30:00.000Z",
                             "endDate": "2024-03-20T19:00:00.000Z",
                             "isAvailable": True,
-                            "linkedProductId": 456,  # Valid
+                            "linkedProductId": 456,
                             "bookableProductId": 123,
                         }
                     ],
@@ -282,11 +266,8 @@ class TestUSCRetryBehavior:
             return response
 
         client.client.get = AsyncMock(side_effect=mock_get)
-        client.auth = MagicMock()
-        client.auth.token_type = "Bearer"
-        client.auth.access_token = "token"
+        client.auth = MagicMock(token_type="Bearer", access_token="token")
 
-        # Should succeed after retries
         date = datetime.now(AMSTERDAM_TZ)
         result = await client.get_slots(date)
         assert result is not None
@@ -326,9 +307,7 @@ class TestUSCRetryBehavior:
             return response
 
         client.client.get = AsyncMock(side_effect=mock_get)
-        client.auth = MagicMock()
-        client.auth.token_type = "Bearer"
-        client.auth.access_token = "token"
+        client.auth = MagicMock(token_type="Bearer", access_token="token")
 
         date = datetime.now(AMSTERDAM_TZ)
 
@@ -376,9 +355,7 @@ class TestUSCRetryBehavior:
         }
 
         client.client.get = AsyncMock(return_value=response)
-        client.auth = MagicMock()
-        client.auth.token_type = "Bearer"
-        client.auth.access_token = "token"
+        client.auth = MagicMock(token_type="Bearer", access_token="token")
 
         date = datetime.now(AMSTERDAM_TZ)
         result = await client.get_slots(date)
@@ -386,3 +363,69 @@ class TestUSCRetryBehavior:
         assert len(result.data) == 1
         assert result.data[0].linkedProductId == 456
         assert result.count == 2
+
+    async def test_get_slots_uses_new_bookable_slots_endpoint_and_headers(self, client):
+        """Test slot lookup calls the new endpoint with configured headers and filters."""
+        response = MagicMock()
+        response.status_code = 200
+        response.raise_for_status.return_value = None
+        response.json.return_value = json.loads((FIXTURES_DIR / "bookable-slots.json").read_text())
+
+        client.client.get = AsyncMock(return_value=response)
+        client.auth = MagicMock(token_type="Bearer", access_token="token")
+
+        date = datetime(2026, 3, 18, 18, 0, tzinfo=AMSTERDAM_TZ)
+        result = await client.get_slots(date)
+
+        assert result.data
+        client.client.get.assert_awaited_once()
+        _, kwargs = client.client.get.call_args
+        assert kwargs["headers"]["Authorization"] == "Bearer token"
+        assert kwargs["headers"]["x-platform"] == "CF"
+        assert kwargs["headers"]["x-custom-lang"] == "en"
+        assert kwargs["headers"]["x-user-role-id"] == "34774"
+        assert kwargs["params"]["s"]
+        query = json.loads(kwargs["params"]["s"])
+        assert query["activityProductIds"]["$in"] == [4637, 4638]
+        assert "$gte" in query["startDate"]
+        assert "$lte" in query["endDate"]
+
+    async def test_book_slot_surfaces_usc_member_lookup_error(self, client):
+        """Test booking failures expose USC's actionable error message."""
+        request = MagicMock()
+        request.url = "https://example.com/participations"
+        error_payload = json.loads((FIXTURES_DIR / "participations-fail.json").read_text())
+        error_response = MagicMock()
+        error_response.status_code = 403
+        error_response.text = json.dumps(error_payload)
+        error_response.json.return_value = error_payload
+        error_response.request = request
+        error = httpx.HTTPStatusError("Forbidden", request=request, response=error_response)
+
+        response = MagicMock()
+        response.raise_for_status.side_effect = error
+        response.text = error_response.text
+        response.json.return_value = error_payload
+
+        client.client.post = AsyncMock(return_value=response)
+        client.auth = MagicMock(token_type="Bearer", access_token="token")
+
+        booking_data = client.create_booking_data(
+            123,
+            ["test@testing.nl"],
+            MagicMock(
+                linkedProductId=4637,
+                bookableProductId=45,
+                startDate=datetime(2026, 3, 18, 17, 45, tzinfo=AMSTERDAM_TZ),
+                endDate=datetime(2026, 3, 18, 18, 29, tzinfo=AMSTERDAM_TZ),
+            ),
+        )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await client.book_slot(booking_data)
+
+        message = str(exc_info.value)
+        assert (
+            "Sorry, unable to book activity, no member found for email test@testing.nl" in message
+        )
+        assert "booking data" in message
